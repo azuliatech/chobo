@@ -1,0 +1,8 @@
+{
+  "name": "kasham-workspace",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}
