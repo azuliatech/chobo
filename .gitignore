@@ -28,6 +28,20 @@ dist/
 .env
 .env.local
 .env.*.local
+.env.production
+.env.development
+
+# Credentials & API Keys
+**/firebase*.json
+**/google*.json
+**/aws*.json
+**/service-account*.json
+*.key
+*.pem
+*.p8
+*.p12
+*.gpg
+.credentials/
 
 # Logs
 logs/

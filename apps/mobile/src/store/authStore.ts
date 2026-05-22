@@ -1,61 +1,92 @@
 import { create } from 'zustand';
-import * as SQLite from 'expo-sqlite';
+import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Simple key-value store using SQLite for token persistence (no extra packages needed)
-const metaDb = SQLite.openDatabaseSync('kasham_meta.db');
+const TOKEN_KEY = 'jwt_token';
+const REFRESH_TOKEN_KEY = 'jwt_refresh_token';
+const BUSINESS_NAME_KEY = 'businessName';
+const USER_ID_KEY = 'userId';
 
-async function initMetaDb() {
-    await metaDb.execAsync(`CREATE TABLE IF NOT EXISTS kv_store (key TEXT PRIMARY KEY, value TEXT)`);
-}
-initMetaDb().catch(console.error);
-
-async function kvGet(key: string): Promise<string | null> {
-    const row: any = await metaDb.getFirstAsync('SELECT value FROM kv_store WHERE key = ?', key);
-    return row?.value ?? null;
-}
-
-async function kvSet(key: string, value: string): Promise<void> {
-    await metaDb.runAsync('INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)', key, value);
-}
-
-async function kvDelete(key: string): Promise<void> {
-    await metaDb.runAsync('DELETE FROM kv_store WHERE key = ?', key);
+/** Decode JWT payload without a library (base64url split). */
+function decodeJwtPayload(token: string): Record<string, any> | null {
+    try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const json = atob(base64);
+        return JSON.parse(json);
+    } catch {
+        return null;
+    }
 }
 
 interface AuthState {
     token: string | null;
+    refreshToken: string | null;
+    userId: string | null;
+    businessName: string | null;
     isReady: boolean;
-    login: (token: string) => Promise<void>;
+    login: (token: string, refreshToken: string, userId: string, businessName?: string | null) => Promise<void>;
     logout: () => Promise<void>;
     restoreToken: () => Promise<void>;
+    setBusinessName: (name: string) => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
     token: null,
+    refreshToken: null,
+    userId: null,
+    businessName: null,
     isReady: false,
-    login: async (token: string) => {
+
+    login: async (token, refreshToken, userId, businessName) => {
         try {
-            await kvSet('jwt_token', token);
-            set({ token });
+            await SecureStore.setItemAsync(TOKEN_KEY, token);
+            await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refreshToken);
+            await AsyncStorage.setItem(USER_ID_KEY, userId);
+            if (businessName) await AsyncStorage.setItem(BUSINESS_NAME_KEY, businessName);
+            set({ token, refreshToken, userId, businessName: businessName ?? null });
         } catch (e) {
-            console.error("Failed to save token", e);
+            console.error('Failed to save auth state', e);
         }
     },
+
     logout: async () => {
         try {
-            await kvDelete('jwt_token');
-            set({ token: null });
+            await SecureStore.deleteItemAsync(TOKEN_KEY);
+            await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+            // NOTE: We do NOT delete userId or businessName from AsyncStorage on logout —
+            // we only clear in-memory state. Data remains in SQLite scoped by userId.
+            set({ token: null, refreshToken: null, userId: null, businessName: null });
         } catch (e) {
-            console.error("Failed to delete token", e);
+            console.error('Failed to clear auth state', e);
         }
     },
+
     restoreToken: async () => {
         try {
-            const token = await kvGet('jwt_token');
-            set({ token, isReady: true });
+            const [token, refreshToken, userId, businessName] = await Promise.all([
+                SecureStore.getItemAsync(TOKEN_KEY),
+                SecureStore.getItemAsync(REFRESH_TOKEN_KEY),
+                AsyncStorage.getItem(USER_ID_KEY),
+                AsyncStorage.getItem(BUSINESS_NAME_KEY),
+            ]);
+
+            // Fallback: if userId wasn't persisted separately, decode from token
+            let resolvedUserId = userId;
+            if (!resolvedUserId && token) {
+                const payload = decodeJwtPayload(token);
+                resolvedUserId = payload?.sub ?? null;
+            }
+
+            set({ token, refreshToken, userId: resolvedUserId, businessName, isReady: true });
         } catch (e) {
-            console.error("Failed to restore token", e);
-            set({ isReady: true, token: null });
+            console.error('Failed to restore auth state', e);
+            set({ isReady: true, token: null, refreshToken: null, userId: null, businessName: null });
         }
-    }
+    },
+
+    setBusinessName: async (name: string) => {
+        await AsyncStorage.setItem(BUSINESS_NAME_KEY, name);
+        set({ businessName: name });
+    },
 }));

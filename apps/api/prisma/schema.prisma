@@ -7,25 +7,45 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  // url is supplied via prisma.config.ts (required by Prisma 7+)
 }
 
 model User {
-  id        String   @id @default(uuid())
-  username  String   @unique
-  password  String
+  id           String   @id @default(uuid())
+  phone        String   @unique
+  password     String
+  shopName     String?
+  businessType String?
+  countryCode  String   @default("NG")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model CatalogueProduct {
+  barcode   String  @id  // barcode is the primary key — globally unique per product
+  name      String
+  brand     String?
+  imageUrl  String?
+  category  String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
-model Product {
-  id        String     @id @default(uuid())
-  name      String
-  price     Float
-  stock     Int        @default(0)
-  barcode   String?    @unique
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  saleItems SaleItem[]
+model UserProduct {
+  id          String    @id @default(uuid())
+  userId      String    // required — no default value
+  barcode     String?   // NOT unique — multiple users can have the same barcode
+  name        String    // user can override the catalogue name
+  sellingPrice Float
+  costPrice   Float?    // optional — for profit tracking
+  stock       Int       @default(0)
+  imageUrl    String?   // user can override the catalogue image
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  saleItems   SaleItem[]
+
+  @@index([userId])    // index for fast per-user queries
+  @@index([userId, barcode]) // index for barcode lookup within a user's inventory
 }
 
 model Customer {
@@ -35,27 +55,65 @@ model Customer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   sales     Sale[]
+  debts     Debt[]
 }
 
 model Sale {
-  id           String     @id @default(uuid())
-  total        Float
-  paymentType  String     // 'CASH', 'TRANSFER', 'POS'
-  timestamp    DateTime   @default(now())
-  synced       Boolean    @default(true)
-  customerId   String?
-  customer     Customer?  @relation(fields: [customerId], references: [id])
-  items        SaleItem[]
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id             String     @id @default(uuid())
+  total          Float
+  discountAmount Float      @default(0)
+  paymentType    String     // 'CASH', 'TRANSFER', 'POS', 'PAY_LATER'
+  timestamp      DateTime   @default(now())
+  synced         Boolean    @default(true)
+  customerId     String?
+  customer       Customer?  @relation(fields: [customerId], references: [id])
+  items          SaleItem[]
+  payments       Payment[]
+  debts          Debt[]
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 }
 
 model SaleItem {
-  id        String  @id @default(uuid())
-  saleId    String
-  sale      Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  productId String
-  product   Product @relation(fields: [productId], references: [id])
-  quantity  Int
-  price     Float   // Price at the time of sale
+  id          String  @id @default(uuid())
+  saleId      String
+  sale        Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  userProductId String?
+  userProduct   UserProduct? @relation(fields: [userProductId], references: [id])
+  productName String?
+  quantity    Int
+  price       Float   // Price at the time of sale
 }
+
+model Payment {
+  id         String   @id @default(uuid())
+  amount     Float
+  senderName String?
+  matched    Boolean  @default(false)
+  saleId     String?
+  sale       Sale?    @relation(fields: [saleId], references: [id])
+  timestamp  DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Debt {
+  id           String   @id @default(uuid())
+  customerId   String
+  customer     Customer @relation(fields: [customerId], references: [id])
+  amountOwed   Float
+  saleId       String?
+  sale         Sale?    @relation(fields: [saleId], references: [id])
+  status       String   @default("PENDING") // PENDING, PAID
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  type      String   // SYSTEM, PAYMENT, LOW_STOCK
+  message   String
+  read      Boolean  @default(false)
+  timestamp DateTime @default(now())
+}
+

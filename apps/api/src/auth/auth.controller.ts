@@ -8,11 +8,23 @@ export class AuthController {
     @HttpCode(HttpStatus.OK)
     @Post('login')
     login(@Body() signInDto: Record<string, any>) {
-        return this.authService.login(signInDto.username, signInDto.password);
+        return this.authService.login(signInDto.phone, signInDto.password);
     }
 
     @Post('register')
     register(@Body() signUpDto: Record<string, any>) {
-        return this.authService.register(signUpDto.username, signUpDto.password);
+        return this.authService.register(
+            signUpDto.phone,
+            signUpDto.password,
+            signUpDto.business_name,
+            signUpDto.business_type,
+            signUpDto.country_code
+        );
+    }
+
+    @HttpCode(HttpStatus.OK)
+    @Post('refresh')
+    refresh(@Body() body: Record<string, any>) {
+        return this.authService.refreshTokens(body.refresh_token);
     }
 }

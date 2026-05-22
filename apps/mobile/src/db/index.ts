@@ -12,6 +12,8 @@ export async function initDatabase() {
       price REAL NOT NULL,
       stock INTEGER NOT NULL DEFAULT 0,
       barcode TEXT,
+      image_uri TEXT,
+      user_id TEXT,
       created_at INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL DEFAULT 0
     )
@@ -21,10 +23,12 @@ export async function initDatabase() {
     CREATE TABLE IF NOT EXISTS sales (
       id TEXT PRIMARY KEY NOT NULL,
       total REAL NOT NULL,
+      discount_amount REAL NOT NULL DEFAULT 0,
       payment_type TEXT NOT NULL,
       timestamp INTEGER NOT NULL DEFAULT 0,
       synced INTEGER NOT NULL DEFAULT 0,
       customer_id TEXT,
+      user_id TEXT,
       created_at INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL DEFAULT 0
     )
@@ -34,32 +38,125 @@ export async function initDatabase() {
     CREATE TABLE IF NOT EXISTS sale_items (
       id TEXT PRIMARY KEY NOT NULL,
       sale_id TEXT NOT NULL,
-      product_id TEXT NOT NULL,
+      product_id TEXT,
+      product_name TEXT,
       quantity INTEGER NOT NULL,
       price REAL NOT NULL,
       created_at INTEGER NOT NULL DEFAULT 0
     )
   `);
+
+    await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS customers (
+      id TEXT PRIMARY KEY NOT NULL,
+      phone TEXT NOT NULL,
+      name TEXT,
+      user_id TEXT,
+      synced INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+
+    await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS debts (
+      id TEXT PRIMARY KEY NOT NULL,
+      customer_id TEXT NOT NULL,
+      amount_owed REAL NOT NULL,
+      sale_id TEXT,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      user_id TEXT,
+      synced INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  
+    await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      is_read INTEGER DEFAULT 0,
+      user_id TEXT,
+      created_at INTEGER NOT NULL DEFAULT 0,
+      related_id TEXT
+    )
+  `);
+
+    await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS payment_logs (
+      id TEXT PRIMARY KEY NOT NULL,
+      amount REAL NOT NULL,
+      sender_name TEXT,
+      sender_phone TEXT,
+      payment_method TEXT,
+      description TEXT,
+      notes TEXT,
+      user_id TEXT,
+      created_at INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  
+  // ---- Safety migrations (idempotent — wrapped in try/catch) ----
+  try { await db.execAsync('ALTER TABLE products ADD COLUMN barcode TEXT'); } catch(e){}
+  try { await db.execAsync('ALTER TABLE products ADD COLUMN user_id TEXT'); } catch(e){}
+  try { await db.execAsync('ALTER TABLE sales ADD COLUMN discount_amount REAL NOT NULL DEFAULT 0'); } catch(e){}
+  try { await db.execAsync('ALTER TABLE sales ADD COLUMN customer_name TEXT'); } catch(e){}
+  try { await db.execAsync('ALTER TABLE sales ADD COLUMN customer_phone TEXT'); } catch(e){}
+  try { await db.execAsync('ALTER TABLE sales ADD COLUMN status TEXT DEFAULT "completed"'); } catch(e){}
+  try { await db.execAsync('ALTER TABLE sales ADD COLUMN notes TEXT'); } catch(e){}
+  try { await db.execAsync('ALTER TABLE sales ADD COLUMN user_id TEXT'); } catch(e){}
+  try { await db.execAsync('ALTER TABLE sale_items ADD COLUMN product_name TEXT'); } catch(e){}
+  try { await db.execAsync('ALTER TABLE customers ADD COLUMN user_id TEXT'); } catch(e){}
+  try { await db.execAsync('ALTER TABLE debts ADD COLUMN user_id TEXT'); } catch(e){}
+  try { await db.execAsync('ALTER TABLE notifications ADD COLUMN user_id TEXT'); } catch(e){}
+  try { await db.execAsync('ALTER TABLE payment_logs ADD COLUMN user_id TEXT'); } catch(e){}
+  try { await db.execAsync('ALTER TABLE products ADD COLUMN cost_price REAL DEFAULT NULL'); } catch(e){}
+
+  try {
+    await db.runAsync(`DELETE FROM products WHERE user_id IS NULL OR user_id = ''`);
+    await db.runAsync(`DELETE FROM sales WHERE user_id IS NULL OR user_id = ''`);
+    await db.runAsync(`DELETE FROM customers WHERE user_id IS NULL OR user_id = ''`);
+    await db.runAsync(`DELETE FROM debts WHERE user_id IS NULL OR user_id = ''`);
+  } catch (e) {
+    console.log('NULL user_id cleanup — already done or no rows found');
+  }
 }
 
 // ---- Products ----
-
-export async function getProducts(): Promise<any[]> {
-    return await db.getAllAsync('SELECT * FROM products ORDER BY name ASC');
+export async function getProducts(userId: string): Promise<any[]> {
+    return await db.getAllAsync('SELECT * FROM products WHERE user_id = ? ORDER BY name ASC', [userId]);
 }
 
-export async function createProduct(id: string, name: string, price: number, stock: number): Promise<void> {
+export async function createProduct(
+    id: string, name: string, price: number, stock: number,
+    barcode: string | null = null, imageUri: string | null = null,
+    userId: string = '', costPrice: number | null = null
+): Promise<void> {
     const now = Date.now();
     await db.runAsync(
-        'INSERT INTO products (id, name, price, stock, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-        id, name, price, stock, now, now
+        'INSERT OR REPLACE INTO products (id, name, price, stock, barcode, image_uri, user_id, cost_price, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        id, name, price, stock, barcode, imageUri, userId, costPrice, now, now
     );
 }
 
-export async function updateProduct(id: string, name: string, price: number, stock: number): Promise<void> {
+export async function updateProduct(
+    id: string, name: string, price: number, stock: number,
+    barcode: string | null = null, imageUri: string | null = null,
+    costPrice: number | null = null
+): Promise<void> {
     await db.runAsync(
-        'UPDATE products SET name = ?, price = ?, stock = ?, updated_at = ? WHERE id = ?',
-        name, price, stock, Date.now(), id
+        'UPDATE products SET name = ?, price = ?, stock = ?, barcode = ?, image_uri = ?, cost_price = ?, updated_at = ? WHERE id = ?',
+        name, price, stock, barcode, imageUri, costPrice, Date.now(), id
+    );
+}
+
+export async function updateProductQuantity(id: string, stock: number): Promise<void> {
+    await db.runAsync(
+        'UPDATE products SET stock = ?, updated_at = ? WHERE id = ?',
+        stock, Date.now(), id
     );
 }
 
@@ -74,34 +171,178 @@ export async function decrementStock(productId: string, qty: number): Promise<vo
     );
 }
 
-// ---- Sales ----
+export async function getProductByBarcode(barcode: string, userId: string): Promise<any | null> {
+    return await db.getFirstAsync('SELECT * FROM products WHERE barcode = ? AND user_id = ?', [barcode, userId]);
+}
 
-export async function createSale(id: string, total: number, paymentType: string): Promise<void> {
+// ---- Sales ----
+export async function createSale(
+    id: string, total: number, paymentType: string,
+    discountAmount: number = 0, customerId: string | null = null,
+    userId: string = ''
+): Promise<void> {
     const now = Date.now();
     await db.runAsync(
-        'INSERT INTO sales (id, total, payment_type, timestamp, synced, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)',
-        id, total, paymentType, now, now, now
+        'INSERT INTO sales (id, total, discount_amount, payment_type, timestamp, synced, customer_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)',
+        id, total, discountAmount, paymentType, now, customerId, userId, now, now
     );
 }
 
-export async function createSaleItem(id: string, saleId: string, productId: string, quantity: number, price: number): Promise<void> {
+export async function createSaleItem(
+    id: string, saleId: string, productId: string | null,
+    productName: string, quantity: number, price: number
+): Promise<void> {
     await db.runAsync(
-        'INSERT INTO sale_items (id, sale_id, product_id, quantity, price, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-        id, saleId, productId, quantity, price, Date.now()
+        'INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, price, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        id, saleId, productId, productName, quantity, price, Date.now()
     );
 }
 
-export async function getDailySales(): Promise<any[]> {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    return await db.getAllAsync(
-        'SELECT * FROM sales WHERE timestamp >= ?',
-        todayStart.getTime()
+export async function getTransactionHistory(userId: string): Promise<any[]> {
+    return await db.getAllAsync(`
+        SELECT s.*, c.name as customer_name, c.phone as customer_phone
+        FROM sales s
+        LEFT JOIN customers c ON s.customer_id = c.id
+        WHERE s.user_id = ?
+        ORDER BY s.timestamp DESC
+    `, [userId]);
+}
+
+export async function getSaleItems(saleId: string): Promise<any[]> {
+    return await db.getAllAsync('SELECT * FROM sale_items WHERE sale_id = ?', saleId);
+}
+
+export async function getFrequentlySoldProducts(userId: string, limit: number = 9): Promise<any[]> {
+    return await db.getAllAsync(`
+        SELECT p.*, COUNT(si.product_id) as sale_count
+        FROM products p
+        JOIN sale_items si ON p.id = si.product_id
+        JOIN sales s ON si.sale_id = s.id
+        WHERE p.user_id = ?
+        GROUP BY p.id
+        ORDER BY sale_count DESC
+        LIMIT ?
+    `, [userId, limit]);
+}
+
+// ---- Stats & Overview ----
+export async function getDailyStats(userId: string, range: 'today' | 'week' | 'month' = 'today'): Promise<any> {
+    const start = new Date();
+    if (range === 'today') start.setHours(0, 0, 0, 0);
+    else if (range === 'week') start.setDate(start.getDate() - 7);
+    else start.setMonth(start.getMonth() - 1);
+
+    const ts = start.getTime();
+    
+    const totals = await db.getFirstAsync(`
+        SELECT 
+            SUM(total) as revenue, 
+            COUNT(*) as count,
+            SUM(CASE WHEN payment_type = 'CASH' THEN total ELSE 0 END) as cash,
+            SUM(CASE WHEN payment_type = 'TRANSFER' THEN total ELSE 0 END) as transfer,
+            SUM(CASE WHEN payment_type = 'POS' THEN total ELSE 0 END) as pos,
+            SUM(CASE WHEN payment_type = 'PAY_LATER' THEN total ELSE 0 END) as pay_later
+        FROM sales 
+        WHERE timestamp >= ? AND user_id = ?
+    `, [ts, userId]) as any;
+
+    const debt = await db.getFirstAsync(`
+        SELECT SUM(amount_owed) as total_debt 
+        FROM debts 
+        WHERE status = 'PENDING' AND created_at >= ? AND user_id = ?
+    `, [ts, userId]) as any;
+
+    return {
+        revenue: totals?.revenue || 0,
+        count: totals?.count || 0,
+        debt: debt?.total_debt || 0,
+        methods: {
+            cash: totals?.cash || 0,
+            transfer: totals?.transfer || 0,
+            pos: totals?.pos || 0,
+            payLater: totals?.pay_later || 0
+        }
+    };
+}
+
+export async function getTopSoldProducts(userId: string, limit: number = 5): Promise<any[]> {
+    return await db.getAllAsync(`
+        SELECT si.product_name as name, SUM(si.quantity) as total_qty, p.image_uri, si.price
+        FROM sale_items si
+        LEFT JOIN products p ON si.product_id = p.id
+        LEFT JOIN sales s ON si.sale_id = s.id
+        WHERE s.user_id = ?
+        GROUP BY si.product_name
+        ORDER BY total_qty DESC
+        LIMIT ?
+    `, [userId, limit]);
+}
+
+// ---- Customers & Debts ----
+export async function getCustomers(userId: string): Promise<any[]> {
+    return await db.getAllAsync('SELECT * FROM customers WHERE user_id = ? ORDER BY name ASC', [userId]);
+}
+
+export async function createCustomer(id: string, phone: string, name: string, userId: string = ''): Promise<void> {
+    const now = Date.now();
+    await db.runAsync(
+        'INSERT INTO customers (id, phone, name, user_id, synced, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)',
+        id, phone, name, userId, now, now
     );
 }
 
-export async function getUnsyncedSales(): Promise<{ sales: any[], saleItems: any[] }> {
-    const sales = await db.getAllAsync('SELECT * FROM sales WHERE synced = 0');
+export async function getOutstandingDebts(userId: string): Promise<any[]> {
+    return await db.getAllAsync(`
+        SELECT d.*, c.name as customer_name, c.phone as customer_phone
+        FROM debts d
+        JOIN customers c ON d.customer_id = c.id
+        WHERE d.status = 'PENDING' AND d.user_id = ?
+        ORDER BY d.created_at DESC
+    `, [userId]);
+}
+
+export async function createDebt(id: string, customerId: string, amountOwed: number, saleId: string | null, userId: string = ''): Promise<void> {
+    const now = Date.now();
+    await db.runAsync(
+        'INSERT INTO debts (id, customer_id, amount_owed, sale_id, status, user_id, synced, created_at, updated_at) VALUES (?, ?, ?, ?, "PENDING", ?, 0, ?, ?)',
+        id, customerId, amountOwed, saleId, userId, now, now
+    );
+}
+
+export async function markDebtPaid(debtId: string): Promise<void> {
+    await db.runAsync(
+        'UPDATE debts SET status = "PAID", updated_at = ? WHERE id = ?',
+        Date.now(), debtId
+    );
+}
+
+export async function getUnpaidDebtsOlderThan(userId: string, daysOld: number): Promise<any[]> {
+    const cutoff = Date.now() - daysOld * 24 * 60 * 60 * 1000;
+    return await db.getAllAsync(`
+        SELECT d.*, c.name as customer_name
+        FROM debts d
+        JOIN customers c ON d.customer_id = c.id
+        WHERE d.status = 'PENDING' AND d.created_at < ? AND d.user_id = ?
+        ORDER BY d.created_at ASC
+    `, [cutoff, userId]);
+}
+
+export async function getStockSummary(userId: string, lowStockThreshold: number = 5): Promise<{ total: number, low: number, outOfStock: number }> {
+    const total = await db.getFirstAsync('SELECT COUNT(*) as count FROM products WHERE user_id = ?', [userId]) as any;
+    const low = await db.getFirstAsync(
+        'SELECT COUNT(*) as count FROM products WHERE stock BETWEEN 1 AND ? AND user_id = ?',
+        [lowStockThreshold, userId]
+    ) as any;
+    const outOfStock = await db.getFirstAsync('SELECT COUNT(*) as count FROM products WHERE stock <= 0 AND user_id = ?', [userId]) as any;
+    return {
+        total: total?.count || 0,
+        low: low?.count || 0,
+        outOfStock: outOfStock?.count || 0
+    };
+}
+
+export async function getUnsyncedSales(userId: string): Promise<{ sales: any[], saleItems: any[] }> {
+    const sales = await db.getAllAsync('SELECT * FROM sales WHERE synced = 0 AND user_id = ?', [userId]);
     if (sales.length === 0) return { sales: [], saleItems: [] };
 
     const placeholders = sales.map(() => '?').join(',');
@@ -119,6 +360,84 @@ export async function markSalesAsSynced(saleIds: string[]): Promise<void> {
     if (saleIds.length === 0) return;
     const placeholders = saleIds.map(() => '?').join(',');
     await db.runAsync(`UPDATE sales SET synced = 1 WHERE id IN (${placeholders})`, saleIds);
+}
+
+export async function getUnsyncedPayments(): Promise<any[]> {
+    return [];
+}
+
+export async function markPaymentsAsSynced(_paymentIds: string[]): Promise<void> {
+    // No-op
+}
+
+export async function getUnsyncedDebts(userId: string): Promise<any[]> {
+    return await db.getAllAsync('SELECT * FROM debts WHERE synced = 0 AND user_id = ?', [userId]);
+}
+
+export async function markDebtsAsSynced(debtIds: string[]): Promise<void> {
+    if (debtIds.length === 0) return;
+    const placeholders = debtIds.map(() => '?').join(',');
+    await db.runAsync(`UPDATE debts SET synced = 1 WHERE id IN (${placeholders})`, debtIds);
+}
+
+// ---- Aliases for OverviewScreen ----
+export async function getDailySales(userId: string): Promise<any[]> {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return await db.getAllAsync(
+        'SELECT * FROM sales WHERE timestamp >= ? AND user_id = ? ORDER BY timestamp DESC',
+        [today.getTime(), userId]
+    );
+}
+
+export const getDebts = getOutstandingDebts;
+
+// ---- Notifications ----
+export async function getNotifications(userId: string): Promise<any[]> {
+    return await db.getAllAsync(
+        'SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC',
+        [userId]
+    );
+}
+
+export async function createNotification(
+    id: string, type: string, title: string,
+    description: string | null = null, relatedId: string | null = null,
+    userId: string = ''
+): Promise<void> {
+    await db.runAsync(
+        'INSERT INTO notifications (id, type, title, description, is_read, user_id, created_at, related_id) VALUES (?, ?, ?, ?, 0, ?, ?, ?)',
+        id, type, title, description, userId, Date.now(), relatedId
+    );
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+    await db.runAsync('UPDATE notifications SET is_read = 1 WHERE id = ?', id);
+}
+
+export async function markAllNotificationsRead(userId: string): Promise<void> {
+    await db.runAsync('UPDATE notifications SET is_read = 1 WHERE user_id = ?', userId);
+}
+
+export async function notificationExistsForRelated(relatedId: string, type: string): Promise<boolean> {
+    const row = await db.getFirstAsync(
+        'SELECT id FROM notifications WHERE related_id = ? AND type = ?',
+        [relatedId, type]
+    ) as any;
+    return !!row;
+}
+
+// ---- Payment Logs ----
+export async function createPaymentLog(
+    id: string, amount: number, senderName: string | null,
+    senderPhone: string | null, paymentMethod: string | null,
+    description: string | null, notes: string | null,
+    userId: string = ''
+): Promise<void> {
+    await db.runAsync(
+        'INSERT INTO payment_logs (id, amount, sender_name, sender_phone, payment_method, description, notes, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        id, amount, senderName, senderPhone, paymentMethod, description, notes, userId, Date.now()
+    );
 }
 
 export { db };

@@ -1,29 +1,34 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, ForbiddenException } from '@nestjs/common';
 import { ProductsService } from './products.service';
 import { AuthGuard } from '../auth/auth.guard';
 
 @UseGuards(AuthGuard)
-@Controller('products')
+@Controller('user-products')
 export class ProductsController {
     constructor(private readonly productsService: ProductsService) { }
 
-    @Post()
-    create(@Body() createProductDto: any) {
-        return this.productsService.create(createProductDto);
+    @Post('sync')
+    syncUserProducts(@Request() req: any, @Body() products: any[]) {
+        return this.productsService.syncUserProducts(req.user.sub, products);
+    }
+
+    @Get('restore')
+    restoreUserProducts(@Request() req: any) {
+        return this.productsService.restoreUserProducts(req.user.sub);
     }
 
     @Get()
-    findAll() {
-        return this.productsService.findAll();
+    findAll(@Request() req: any) {
+        return this.productsService.findAll(req.user.sub);
     }
 
     @Patch(':id')
-    update(@Param('id') id: string, @Body() updateProductDto: any) {
-        return this.productsService.update(id, updateProductDto);
+    update(@Param('id') id: string, @Request() req: any, @Body() updateProductDto: any) {
+        return this.productsService.update(id, req.user.sub, updateProductDto);
     }
 
     @Delete(':id')
-    remove(@Param('id') id: string) {
-        return this.productsService.remove(id);
+    remove(@Param('id') id: string, @Request() req: any) {
+        return this.productsService.remove(id, req.user.sub);
     }
 }

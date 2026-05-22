@@ -11,7 +11,8 @@ export class SalesService {
                 data: changes.sales.created.map((s: any) => ({
                     id: s.id,
                     total: s.total,
-                    paymentType: s.paymentType,
+                    discountAmount: s.discount_amount || s.discountAmount || 0,
+                    paymentType: s.payment_type || s.paymentType,
                     synced: true,
                     timestamp: s.timestamp ? new Date(s.timestamp) : new Date(),
                 })),
@@ -25,6 +26,7 @@ export class SalesService {
                     id: si.id,
                     saleId: si.sale_id || si.saleId,
                     productId: si.product_id || si.productId,
+                    productName: si.product_name || si.productName,
                     quantity: si.quantity,
                     price: si.price,
                 })),

@@ -1,100 +1,115 @@
-import { getProducts, getUnsyncedSales, markSalesAsSynced } from '../db';
+import { getProducts, getUnsyncedSales, markSalesAsSynced, getUnsyncedPayments, markPaymentsAsSynced, getUnsyncedDebts, markDebtsAsSynced } from '../db';
 import { useAuthStore } from '../store/authStore';
 import { useSyncStore } from '../store/syncStore';
 import { API_URL } from '../config';
 
-async function pushProductsToBackend(token: string) {
-    const products = await getProducts();
+async function pushProductsToBackend(token: string, userId: string) {
+    if (!userId) return;
+    const products = await getProducts(userId);
     if (products.length === 0) return;
 
-    // Upsert-style: try to create each product, silently skip if already on backend
-    for (const p of products) {
-        try {
-            await fetch(`${API_URL}/products`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    id: p.id,
-                    name: p.name,
-                    price: p.price,
-                    stock: p.stock,
-                })
-            });
-        } catch (e) {
-            console.warn('[Sync] Could not push product:', p.id, e);
-        }
-    }
-    console.log(`[Sync] Products synced: ${products.length}`);
-}
-
-export async function pushSalesToBackend() {
-    const { token } = useAuthStore.getState();
-    const { isSyncing, setIsSyncing, setLastSyncedAt } = useSyncStore.getState();
-
-    if (isSyncing) return;
-    if (!token) {
-        console.log("[Sync] Waiting for authentication...");
-        return;
-    }
-
     try {
-        setIsSyncing(true);
-
-        // Step 1: Sync products first so FK constraints are satisfied on backend
-        await pushProductsToBackend(token);
-
-        // Step 2: Push unsynced sales
-        const { sales, saleItems } = await getUnsyncedSales();
-
-        if (sales.length === 0) {
-            console.log("[Sync] Everything is up to date.");
-            return;
-        }
-
-        console.log(`[Sync] Found ${sales.length} sales to sync.`);
-
-        const changes = {
-            sales: {
-                created: sales.map(s => ({
-                    id: s.id,
-                    total: s.total,
-                    paymentType: s.payment_type,
-                    timestamp: s.timestamp
-                }))
-            },
-            saleItems: {
-                created: saleItems.map(si => ({
-                    id: si.id,
-                    saleId: si.sale_id,
-                    productId: si.product_id,
-                    quantity: si.quantity,
-                    price: si.price
-                }))
-            }
-        };
-
-        const res = await fetch(`${API_URL}/sales/sync`, {
+        await fetch(`${API_URL}/user-products/sync`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
             },
-            body: JSON.stringify({ changes, lastPulledAt: Date.now() })
+            body: JSON.stringify(products.map(p => ({
+                id: p.id,
+                name: p.name,
+                sellingPrice: p.price,
+                costPrice: p.cost_price ?? null,
+                stock: p.stock,
+                imageUrl: p.image_uri ?? null,
+                barcode: p.barcode ?? null,
+            })))
         });
+    } catch (e) {
+        console.warn('[Sync] Could not push products:', e);
+    }
+}
 
-        if (!res.ok) {
-            const errorData = await res.text();
-            throw new Error(`Sync failed with status ${res.status}: ${errorData}`);
+export async function pushSalesToBackend() {
+    const { token, userId } = useAuthStore.getState();
+    const { isSyncing, setIsSyncing, setLastSyncedAt } = useSyncStore.getState();
+
+    if (isSyncing) return;
+    if (!token || !userId) return;
+
+    try {
+        setIsSyncing(true);
+
+        await pushProductsToBackend(token, userId);
+
+        // Sync Sales
+        const { sales, saleItems } = await getUnsyncedSales(userId);
+        if (sales.length > 0) {
+            const changes = {
+                sales: {
+                    created: sales.map(s => ({
+                        id: s.id,
+                        total: s.total,
+                        paymentType: s.payment_type,
+                        timestamp: s.timestamp
+                    }))
+                },
+                saleItems: {
+                    created: saleItems.map(si => ({
+                        id: si.id,
+                        saleId: si.sale_id,
+                        productId: si.product_id,
+                        quantity: si.quantity,
+                        price: si.price
+                    }))
+                }
+            };
+
+            const res = await fetch(`${API_URL}/sales/sync`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ changes, lastPulledAt: Date.now() })
+            });
+
+            if (res.ok) {
+                await markSalesAsSynced(sales.map(s => s.id));
+            }
         }
 
-        const saleIds = sales.map(s => s.id);
-        await markSalesAsSynced(saleIds);
+        // Sync Payments
+        const payments = await getUnsyncedPayments();
+        if (payments.length > 0) {
+            for (const p of payments) {
+                await fetch(`${API_URL}/payments`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({
+                        id: p.id, amount: p.amount, senderName: p.sender_name, matched: p.matched === 1, saleId: p.sale_id
+                    })
+                });
+            }
+            await markPaymentsAsSynced(payments.map(p => p.id));
+        }
+
+        // Sync Debts
+        const debts = await getUnsyncedDebts(userId);
+        if (debts.length > 0) {
+             for (const d of debts) {
+                await fetch(`${API_URL}/debts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({
+                        id: d.id, customerId: d.customer_id, amountOwed: d.amount_owed, saleId: d.sale_id, status: d.status
+                    })
+                });
+            }
+            await markDebtsAsSynced(debts.map(d => d.id));
+        }
 
         setLastSyncedAt(new Date());
-        console.log(`[Sync] Successfully pushed ${saleIds.length} sales.`);
 
     } catch (e: any) {
         console.error("[Sync Error]", e.message);

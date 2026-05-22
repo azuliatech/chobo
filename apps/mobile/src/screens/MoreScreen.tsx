@@ -1,58 +1,151 @@
-import React from 'react';
-import { View, Text, StyleSheet, Platform, TouchableOpacity, Alert } from 'react-native';
-import { db } from '../db';
+import React, { useState } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { useAuthStore } from '../store/authStore';
+import { useCartStore } from '../store/cartStore';
+import { Header } from './SellScreen';
+import { 
+    User, 
+    Settings, 
+    HelpCircle, 
+    LogOut, 
+    Trash2, 
+    ChevronRight,
+    Store,
+    ShieldCheck,
+    Wrench
+} from 'lucide-react-native';
+
+import PersonalInfoScreen from './PersonalInfoScreen';
+import BusinessSettingsScreen from './BusinessSettingsScreen';
+import SecurityScreen from './SecurityScreen';
+import SystemSettingsScreen from './SystemSettingsScreen';
+import HelpSupportScreen from './HelpSupportScreen';
+import DeleteAccountScreen from './DeleteAccountScreen';
+import DevToolsScreen from './DevToolsScreen';
+
+const MenuItem = ({ icon: Icon, color, label, onPress, sublabel }: any) => (
+    <TouchableOpacity 
+        onPress={onPress}
+        className="bg-white px-6 py-5 flex-row items-center border-b border-border/50"
+    >
+        <View className="w-10 h-10 rounded-xl items-center justify-center" style={{ backgroundColor: `${color}15` }}>
+            <Icon size={20} color={color} />
+        </View>
+        <View className="flex-1 ml-4">
+            <Text className="text-textPrimary font-bold text-base">{label}</Text>
+            {sublabel && <Text className="text-textSecondary text-[10px] uppercase font-bold mt-0.5">{sublabel}</Text>}
+        </View>
+        <ChevronRight size={16} color="#CBD5E1" />
+    </TouchableOpacity>
+);
 
 export default function MoreScreen() {
-    const clearAllData = () => {
-        Alert.alert('Clear Data', 'This will delete ALL local data. Are you sure?', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-                text: 'Clear', style: 'destructive', onPress: async () => {
-                    await db.execAsync('DELETE FROM sale_items');
-                    await db.execAsync('DELETE FROM sales');
-                    await db.execAsync('DELETE FROM products');
-                }
-            }
-        ]);
+    const { logout } = useAuthStore();
+    const { clearCart } = useCartStore();
+    const [activeSubScreen, setActiveSubScreen] = useState<string | null>(null);
+
+    const handleSignOut = () => {
+        Alert.alert(
+            'Sign Out',
+            'Are you sure you want to sign out?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Sign Out', style: 'destructive', onPress: async () => {
+                    clearCart();
+                    await logout();
+                }}
+            ]
+        );
     };
 
-    return (
-        <View style={styles.container}>
-            <View style={styles.header}>
-                <Text style={styles.title}>⚙️ More</Text>
-            </View>
-            <View style={{ padding: 16 }}>
-                <View style={styles.card}>
-                    <Text style={styles.cardTitle}>About KashAm</Text>
-                    <Text style={styles.cardSub}>v1.0.0 MVP • Offline-first POS for Nigerian retail</Text>
-                </View>
+    if (activeSubScreen === 'PersonalInfo') return <PersonalInfoScreen onBack={() => setActiveSubScreen(null)} />;
+    if (activeSubScreen === 'BusinessSettings') return <BusinessSettingsScreen onBack={() => setActiveSubScreen(null)} />;
+    if (activeSubScreen === 'Security') return <SecurityScreen onBack={() => setActiveSubScreen(null)} />;
+    if (activeSubScreen === 'SystemSettings') return <SystemSettingsScreen onBack={() => setActiveSubScreen(null)} />;
+    if (activeSubScreen === 'HelpSupport') return <HelpSupportScreen onBack={() => setActiveSubScreen(null)} />;
+    if (activeSubScreen === 'DeleteAccount') return <DeleteAccountScreen onBack={() => setActiveSubScreen(null)} onConfirm={logout} />;
+    if (activeSubScreen === 'DevTools') return <DevToolsScreen onBack={() => setActiveSubScreen(null)} />;
 
-                <View style={styles.card}>
-                    <Text style={styles.cardTitle}>🔄 Sync Status</Text>
-                    <Text style={styles.cardSub}>Background sync when internet available</Text>
-                    <View style={styles.statusDot}>
-                        <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>Offline Ready</Text>
+    return (
+        <View className="flex-1 bg-lightBackground">
+            <Header title="More" subtitle="Account & Settings" />
+            
+            <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
+                <View className="mt-8 mb-4 px-6">
+                    <Text className="text-textSecondary text-[10px] font-black uppercase tracking-widest mb-4">Business Profile</Text>
+                    <View className="bg-white rounded-3xl overflow-hidden border border-border shadow-sm">
+                        <MenuItem 
+                            icon={User} 
+                            color="#16A34A" 
+                            label="Personal Info" 
+                            sublabel="Manage your personal details"
+                            onPress={() => setActiveSubScreen('PersonalInfo')} 
+                        />
+                        <MenuItem 
+                            icon={Store} 
+                            color="#2563EB" 
+                            label="Business Settings" 
+                            sublabel="Change store name & address"
+                            onPress={() => setActiveSubScreen('BusinessSettings')} 
+                        />
+                        <MenuItem 
+                            icon={ShieldCheck} 
+                            color="#8B5CF6" 
+                            label="Security" 
+                            sublabel="Password & authentication"
+                            onPress={() => setActiveSubScreen('Security')} 
+                        />
                     </View>
                 </View>
 
-                <TouchableOpacity style={styles.dangerCard} onPress={clearAllData}>
-                    <Text style={styles.dangerTitle}>🗑 Clear All Local Data</Text>
-                    <Text style={styles.dangerSub}>Removes all products, sales, and records</Text>
-                </TouchableOpacity>
-            </View>
+                <View className="mb-4 px-6">
+                    <Text className="text-textSecondary text-[10px] font-black uppercase tracking-widest mb-4">App Preferences</Text>
+                    <View className="bg-white rounded-3xl overflow-hidden border border-border shadow-sm">
+                        <MenuItem 
+                            icon={Settings} 
+                            color="#64748B" 
+                            label="System Settings" 
+                            sublabel="Language, theme & currency"
+                            onPress={() => setActiveSubScreen('SystemSettings')} 
+                        />
+                        <MenuItem 
+                            icon={HelpCircle} 
+                            color="#0EA5E9" 
+                            label="Help & Support" 
+                            sublabel="FAQs and contact us"
+                            onPress={() => setActiveSubScreen('HelpSupport')} 
+                        />
+                        {__DEV__ && (
+                            <MenuItem 
+                                icon={Wrench} 
+                                color="#EAB308" 
+                                label="Developer Tools" 
+                                sublabel="Reset DB, clear cache"
+                                onPress={() => setActiveSubScreen('DevTools')} 
+                            />
+                        )}
+                    </View>
+                </View>
+
+                <View className="mb-12 px-6">
+                    <Text className="text-textSecondary text-[10px] font-black uppercase tracking-widest mb-4">Safety Zone</Text>
+                    <View className="bg-white rounded-3xl overflow-hidden border border-border shadow-sm">
+                        <MenuItem 
+                            icon={LogOut} 
+                            color="#0F172A" 
+                            label="Sign Out" 
+                            onPress={handleSignOut} 
+                        />
+                        <MenuItem 
+                            icon={Trash2} 
+                            color="#EF4444" 
+                            label="Delete Account" 
+                            onPress={() => setActiveSubScreen('DeleteAccount')} 
+                        />
+                    </View>
+                    <Text className="text-center text-textSecondary text-[10px] mt-8 font-bold">KashAm v1.2.0 · Offline-First Engine</Text>
+                </View>
+            </ScrollView>
         </View>
     );
 }
-
-const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#0f172a', paddingTop: Platform.OS === 'android' ? 44 : 50 },
-    header: { paddingHorizontal: 16, paddingBottom: 12 },
-    title: { fontSize: 22, fontWeight: '800', color: '#f8fafc' },
-    card: { backgroundColor: '#1e293b', borderRadius: 16, padding: 18, marginBottom: 14, borderWidth: 1, borderColor: '#334155' },
-    cardTitle: { color: '#f8fafc', fontWeight: '700', fontSize: 16, marginBottom: 4 },
-    cardSub: { color: '#94a3b8', fontSize: 13 },
-    statusDot: { marginTop: 10, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 5, alignSelf: 'flex-start', backgroundColor: '#16a34a' },
-    dangerCard: { backgroundColor: '#450a0a', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#ef4444' },
-    dangerTitle: { color: '#f87171', fontWeight: '700', fontSize: 16, marginBottom: 4 },
-    dangerSub: { color: '#94a3b8', fontSize: 13 },
-});

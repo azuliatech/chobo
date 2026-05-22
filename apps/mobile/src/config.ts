@@ -1,4 +1,3 @@
-import { Platform } from 'react-native';
-
-// Updated to match your machine's Local Network IP so Expo Go can connect to the backend.
-export const API_URL = 'http://10.181.125.27:3000/api/v1';
+// Re-export from canonical config location.
+// Use API_BASE_URL for all new code. API_URL kept for backward compatibility.
+export { API_BASE_URL as API_URL, API_BASE_URL } from './config/api';
