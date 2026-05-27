@@ -3,6 +3,8 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtModule } from '@nestjs/jwt';
 
+import { SmsService } from './sms.service';
+
 @Module({
   imports: [
     JwtModule.register({
@@ -11,8 +13,8 @@ import { JwtModule } from '@nestjs/jwt';
       signOptions: { expiresIn: '7d' },
     }),
   ],
-  providers: [AuthService],
+  providers: [AuthService, SmsService],
   controllers: [AuthController],
-  exports: [AuthService],
+  exports: [AuthService, SmsService],
 })
 export class AuthModule { }

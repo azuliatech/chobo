@@ -49,6 +49,7 @@ export default function LoginScreen() {
     
     // OTP State (6 digits)
     const [otp, setOtp] = useState(['', '', '', '', '', '']);
+    const [pinId, setPinId] = useState('');
     const [countdown, setCountdown] = useState(60);
     const otpRefs = useRef<Array<TextInput | null>>([]);
     
@@ -236,10 +237,92 @@ export default function LoginScreen() {
         }
     };
 
-    const handleResendOtp = () => {
-        setCountdown(60);
+    const handleSendOtp = async () => {
+        if (!phone) {
+            Alert.alert('Error', 'Please enter your phone number');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_URL}/auth/send-otp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: getFullPhone() })
+            });
+            const data = await res.json();
+            
+            if (res.ok && data.success) {
+                setPinId(data.pinId);
+                setCountdown(60);
+                setOtp(['', '', '', '', '', '']);
+                setStep('signup_otp');
+            } else {
+                Alert.alert('Error', data.message || 'Could not send verification code.');
+            }
+        } catch (e) {
+            Alert.alert('Network Error', 'Could not reach the server.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleVerifyOtp = async () => {
+        const otpString = otp.join('');
+        if (otpString.length !== 6) {
+            Alert.alert('Error', 'Please enter the 6-digit code');
+            return;
+        }
+
+        if (!pinId) {
+            Alert.alert('Error', 'Session expired. Please resend code.');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_URL}/auth/verify-otp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin_id: pinId, pin: otpString })
+            });
+            const data = await res.json();
+            
+            if (res.ok && data.success) {
+                setStep('signup_business');
+            } else {
+                Alert.alert('Verification Failed', data.message || 'The code you entered is incorrect or has expired.');
+            }
+        } catch (e) {
+            Alert.alert('Network Error', 'Could not reach the server.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleResendOtp = async () => {
         setOtp(['', '', '', '', '', '']);
-        // TODO: Trigger real SMS resend
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_URL}/auth/send-otp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: getFullPhone() })
+            });
+            const data = await res.json();
+            
+            if (res.ok && data.success) {
+                setPinId(data.pinId);
+                setCountdown(60);
+                Alert.alert('Success', 'Verification code resent.');
+            } else {
+                Alert.alert('Error', data.message || 'Could not resend verification code.');
+            }
+        } catch (e) {
+            Alert.alert('Network Error', 'Could not reach the server.');
+        } finally {
+            setLoading(false);
+        }
     };
 
     const renderWelcome = () => (
@@ -397,17 +480,16 @@ export default function LoginScreen() {
             </View>
 
             <TouchableOpacity 
-                onPress={() => { 
-                    if(phone) {
-                        setCountdown(60);
-                        setOtp(['', '', '', '', '', '']);
-                        setStep('signup_otp'); 
-                    }
-                }}
-                className={`w-full h-[52px] rounded-xl items-center flex-row justify-center shadow-sm ${phone ? 'bg-primary active:bg-[#15803D]' : 'bg-primary/50'}`}
+                onPress={handleSendOtp}
+                disabled={loading || !phone}
+                className={`w-full h-[52px] rounded-xl items-center flex-row justify-center shadow-sm ${(phone && !loading) ? 'bg-primary active:bg-[#15803D]' : 'bg-primary/50'}`}
             >
-                <Text className="text-white font-black text-lg mr-2">Continue</Text>
-                <ChevronRight size={20} color="white" />
+                {loading ? <ActivityIndicator color="white" /> : (
+                    <>
+                        <Text className="text-white font-black text-lg mr-2">Continue</Text>
+                        <ChevronRight size={20} color="white" />
+                    </>
+                )}
             </TouchableOpacity>
         </View>
     );
@@ -455,12 +537,16 @@ export default function LoginScreen() {
             </View>
 
             <TouchableOpacity 
-                onPress={() => setStep('signup_business')}
-                disabled={otp.join('').length !== 6 || countdown === 0}
-                className={`w-full h-[52px] rounded-xl items-center flex-row justify-center shadow-sm ${(otp.join('').length === 6 && countdown > 0) ? 'bg-primary active:bg-[#15803D]' : 'bg-primary/50'}`}
+                onPress={handleVerifyOtp}
+                disabled={loading || otp.join('').length !== 6 || countdown === 0}
+                className={`w-full h-[52px] rounded-xl items-center flex-row justify-center shadow-sm ${(otp.join('').length === 6 && countdown > 0 && !loading) ? 'bg-primary active:bg-[#15803D]' : 'bg-primary/50'}`}
             >
-                <Text className="text-white font-black text-lg mr-2">Verify (Mock)</Text>
-                <ChevronRight size={20} color="white" />
+                {loading ? <ActivityIndicator color="white" /> : (
+                    <>
+                        <Text className="text-white font-black text-lg mr-2">Verify Phone</Text>
+                        <ChevronRight size={20} color="white" />
+                    </>
+                )}
             </TouchableOpacity>
         </View>
     );

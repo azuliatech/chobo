@@ -15,8 +15,8 @@ describe('AppController', () => {
   });
 
   describe('root', () => {
-    it('should return "Hello World!"', () => {
-      expect(appController.getHello()).toBe('Hello World!');
+    it('should return operational status', () => {
+      expect(appController.getHello()).toContain('KashAm API is fully operational');
     });
   });
 });
