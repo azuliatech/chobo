@@ -3,7 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 
-const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'kasham-refresh-secret-key';
+const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || (process.env.NODE_ENV === 'production' ? (() => { throw new Error('JWT_REFRESH_SECRET must be defined in production!'); })() : 'kasham-refresh-secret-key');
 
 @Injectable()
 export class AuthService {

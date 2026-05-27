@@ -3,7 +3,7 @@ import {
     View, Text, TextInput, TouchableOpacity, FlatList, Modal, ScrollView, Image, ActivityIndicator, Alert
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getProducts, createProduct, updateProduct, deleteProduct, getStockSummary } from '../db';
+import { getProducts, createProduct, updateProduct, updateProductQuantity, deleteProduct, getStockSummary } from '../db';
 import { 
     Plus, 
     X, 
@@ -180,7 +180,6 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
         } catch (e) {
             console.error('Lookup failed', e);
         } finally {
-            clearTimeout(timer);
             setShowLookupStatus(false);
             setLookupState('done');
             setModalVisible(true);

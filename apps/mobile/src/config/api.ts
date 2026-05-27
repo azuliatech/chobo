@@ -14,4 +14,4 @@
  *
  * NEVER use http://localhost:3000 on a physical device — that points to the phone itself.
  */
-export const API_BASE_URL = 'http://10.121.132.138:3000/api/v1';
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api/v1';

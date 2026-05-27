@@ -7,7 +7,7 @@ import { JwtModule } from '@nestjs/jwt';
   imports: [
     JwtModule.register({
       global: true,
-      secret: process.env.JWT_SECRET || 'super-secret-jwt-key',
+      secret: process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? (() => { throw new Error('JWT_SECRET must be defined in production!'); })() : 'super-secret-jwt-key'),
       signOptions: { expiresIn: '7d' },
     }),
   ],
