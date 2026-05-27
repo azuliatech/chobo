@@ -22,8 +22,8 @@ export class SmsService {
             cleanedPhone = '234' + cleanedPhone.slice(1);
         }
 
-        // 1. Mock Mode Fallback if API key is not configured or in development mode
-        if (!this.apiKey || this.apiKey === 'mock' || process.env.NODE_ENV !== 'production') {
+        // 1. Mock Mode Fallback if API key is not configured or set to mock
+        if (!this.apiKey || this.apiKey === 'mock') {
             const mockPin = Math.floor(100000 + Math.random() * 900000).toString();
             const mockPinId = `mock_session_${Math.random().toString(36).substring(2, 15)}`;
             
@@ -107,7 +107,7 @@ export class SmsService {
      */
     async verifyOtp(pinId: string, pin: string): Promise<boolean> {
         // 1. Mock Mode Verification
-        if (pinId.startsWith('mock_session_') || !this.apiKey || this.apiKey === 'mock' || process.env.NODE_ENV !== 'production') {
+        if (pinId.startsWith('mock_session_') || !this.apiKey || this.apiKey === 'mock') {
             const cached = this.mockOtpCache.get(pinId);
             if (!cached) return false;
             
