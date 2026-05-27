@@ -49,10 +49,10 @@ export class SalesService {
             },
         });
 
-        const totalRevenue = sales.reduce((sum, sale) => sum + sale.total, 0);
+        const totalRevenue = sales.reduce((sum: number, sale: any) => sum + sale.total, 0);
         const totalTransactions = sales.length;
 
-        const breakdown = sales.reduce((acc, sale) => {
+        const breakdown = sales.reduce((acc: Record<string, number>, sale: any) => {
             acc[sale.paymentType] = (acc[sale.paymentType] || 0) + sale.total;
             return acc;
         }, {} as Record<string, number>);
