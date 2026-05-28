@@ -128,7 +128,7 @@ export default function LoginScreen() {
                 // Prefer server-stored country code; fall back to current picker selection
                 const serverCountryCode = data.country_code || countryCode;
                 await saveCountryCode(serverCountryCode);
-                await login(data.access_token, data.refresh_token, data.user_id, data.shop_name);
+                await login(data.access_token, data.refresh_token, data.user_id, data.shop_name, data.stores || []);
             } else {
                 Alert.alert('Login Failed', data.message || 'Invalid credentials');
             }
@@ -194,7 +194,7 @@ export default function LoginScreen() {
             
             if (res.ok && data.access_token) {
                 await saveCountryCode(countryCode);
-                await login(data.access_token, data.refresh_token, data.user_id, data.shop_name);
+                await login(data.access_token, data.refresh_token, data.user_id, data.shop_name, data.stores || []);
             } else {
                 Alert.alert('Registration Failed', data.message || 'An error occurred');
             }

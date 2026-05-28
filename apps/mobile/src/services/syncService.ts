@@ -3,18 +3,28 @@ import { useAuthStore } from '../store/authStore';
 import { useSyncStore } from '../store/syncStore';
 import { API_URL } from '../config';
 
-async function pushProductsToBackend(token: string, userId: string) {
-    if (!userId) return;
-    const products = await getProducts(userId);
+/** Returns standard auth + store-scoping headers for every API request. */
+export function buildHeaders(token: string, activeStoreOwnerId?: string | null): Record<string, string> {
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+    };
+    if (activeStoreOwnerId) {
+        headers['x-active-owner-id'] = activeStoreOwnerId;
+    }
+    return headers;
+}
+
+async function pushProductsToBackend(token: string, userId: string, activeStoreOwnerId: string | null) {
+    // When staff, push products scoped to the active store owner's catalog
+    const ownerId = activeStoreOwnerId || userId;
+    const products = await getProducts(ownerId);
     if (products.length === 0) return;
 
     try {
         await fetch(`${API_URL}/user-products/sync`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
+            headers: buildHeaders(token, activeStoreOwnerId),
             body: JSON.stringify(products.map(p => ({
                 id: p.id,
                 name: p.name,
@@ -31,19 +41,22 @@ async function pushProductsToBackend(token: string, userId: string) {
 }
 
 export async function pushSalesToBackend() {
-    const { token, userId } = useAuthStore.getState();
+    const { token, userId, activeStoreOwnerId } = useAuthStore.getState();
     const { isSyncing, setIsSyncing, setLastSyncedAt } = useSyncStore.getState();
 
     if (isSyncing) return;
     if (!token || !userId) return;
 
+    // Use active store owner for scoping — so a cashier's sales sync to the correct store
+    const ownerId = activeStoreOwnerId || userId;
+
     try {
         setIsSyncing(true);
 
-        await pushProductsToBackend(token, userId);
+        await pushProductsToBackend(token, userId, activeStoreOwnerId);
 
-        // Sync Sales
-        const { sales, saleItems } = await getUnsyncedSales(userId);
+        // Sync Sales (scoped to the active store owner)
+        const { sales, saleItems } = await getUnsyncedSales(ownerId);
         if (sales.length > 0) {
             const changes = {
                 sales: {
@@ -67,10 +80,7 @@ export async function pushSalesToBackend() {
 
             const res = await fetch(`${API_URL}/sales/sync`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
+                headers: buildHeaders(token, activeStoreOwnerId),
                 body: JSON.stringify({ changes, lastPulledAt: Date.now() })
             });
 
@@ -85,7 +95,7 @@ export async function pushSalesToBackend() {
             for (const p of payments) {
                 await fetch(`${API_URL}/payments`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    headers: buildHeaders(token, activeStoreOwnerId),
                     body: JSON.stringify({
                         id: p.id, amount: p.amount, senderName: p.sender_name, matched: p.matched === 1, saleId: p.sale_id
                     })
@@ -95,12 +105,12 @@ export async function pushSalesToBackend() {
         }
 
         // Sync Debts
-        const debts = await getUnsyncedDebts(userId);
+        const debts = await getUnsyncedDebts(ownerId);
         if (debts.length > 0) {
              for (const d of debts) {
                 await fetch(`${API_URL}/debts`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    headers: buildHeaders(token, activeStoreOwnerId),
                     body: JSON.stringify({
                         id: d.id, customerId: d.customer_id, amountOwed: d.amount_owed, saleId: d.sale_id, status: d.status
                     })
@@ -112,7 +122,7 @@ export async function pushSalesToBackend() {
         setLastSyncedAt(new Date());
 
     } catch (e: any) {
-        console.error("[Sync Error]", e.message);
+        console.error('[Sync Error]', e.message);
     } finally {
         setIsSyncing(false);
     }

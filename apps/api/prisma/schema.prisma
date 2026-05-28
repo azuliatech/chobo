@@ -17,8 +17,30 @@ model User {
   shopName     String?
   businessType String?
   countryCode  String   @default("NG")
+  role         String   @default("OWNER") // OWNER | MANAGER | CASHIER — their own store role
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  // As an employee: all stores this user works at
+  staffLinks   StaffLink[] @relation("StaffMember")
+  // As an owner: all staff linked to this store
+  storeStaff   StaffLink[] @relation("StoreOwner")
+}
+
+model StaffLink {
+  id        String   @id @default(uuid())
+  userId    String   // The employee/staff member
+  ownerId   String   // The store owner they work under
+  role      String   // MANAGER | CASHIER
+  status    String   @default("ACTIVE") // ACTIVE | REMOVED
+  createdAt DateTime @default(now())
+
+  user  User @relation("StaffMember", fields: [userId], references: [id], onDelete: Cascade)
+  owner User @relation("StoreOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, ownerId]) // A staff member can only be linked to an owner once
+  @@index([ownerId])          // Fast lookup by owner
+  @@index([userId])           // Fast lookup by employee
 }
 
 model CatalogueProduct {
