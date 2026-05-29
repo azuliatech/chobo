@@ -23,8 +23,9 @@ export default function OverviewScreen() {
     const [stats, setStats] = useState<any>(null);
     const [topProducts, setTopProducts] = useState<any[]>([]);
     const [refreshing, setRefreshing] = useState(false);
-    const { userId } = useAuthStore();
+    const { userId, activeRole } = useAuthStore();
     const { formatAmount } = useCurrency();
+    const isCashier = activeRole === 'CASHIER';
 
     const loadData = useCallback(async () => {
         if (!userId) return;
@@ -89,7 +90,8 @@ export default function OverviewScreen() {
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadData} />}
                 showsVerticalScrollIndicator={false}
             >
-                {/* HERO CARD */}
+                {/* HERO CARD — hidden from Cashiers */}
+                {!isCashier ? (
                 <View className="bg-textPrimary p-6 rounded-[32px] mb-6 shadow-xl relative overflow-hidden">
                     <View className="absolute -top-12 -right-12 w-48 h-48 bg-primary/20 rounded-full blur-3xl" />
                     <View className="absolute -bottom-8 -left-8 w-32 h-32 bg-accent/20 rounded-full blur-2xl" />
@@ -105,6 +107,13 @@ export default function OverviewScreen() {
                         <Text className="text-white/60 font-bold text-xs">vs last {filter === 'today' ? 'period' : filter}</Text>
                     </View>
                 </View>
+                ) : (
+                <View className="bg-textPrimary p-6 rounded-[32px] mb-6 shadow-xl">
+                    <Text className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-1">Your Sales Today</Text>
+                    <Text className="text-white font-black text-4xl mb-2">{stats?.count || 0}</Text>
+                    <Text className="text-white/40 text-xs font-semibold">Transactions recorded this period</Text>
+                </View>
+                )}
 
                 {/* 2x2 METRIC GRID */}
                 <View className="flex-row flex-wrap gap-4 mb-8">
@@ -115,6 +124,8 @@ export default function OverviewScreen() {
                         <Text className="text-textSecondary text-[10px] font-bold uppercase mb-1">Sales Count</Text>
                         <Text className="text-textPrimary font-black text-2xl">{stats?.count || 0}</Text>
                     </View>
+                    {/* Debt card hidden from Cashiers */}
+                    {!isCashier && (
                     <View className="w-[47%] bg-white p-4 rounded-3xl border border-border shadow-sm">
                         <View className="w-8 h-8 rounded-full bg-dangerLight items-center justify-center mb-3">
                             <TrendingDown size={16} color="#EF4444" />
@@ -122,6 +133,7 @@ export default function OverviewScreen() {
                         <Text className="text-textSecondary text-[10px] font-bold uppercase mb-1">Debt Issued</Text>
                         <Text className="text-textPrimary font-black text-2xl">{formatAmount(stats?.debt || 0)}</Text>
                     </View>
+                    )}
                 </View>
 
                 {/* PAYMENT BREAKDOWN */}
