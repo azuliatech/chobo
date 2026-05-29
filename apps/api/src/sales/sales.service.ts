@@ -3,20 +3,21 @@ import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class SalesService {
-    constructor(private prisma: PrismaService) { }
+    constructor(private prisma: PrismaService) {}
 
-    async syncData(changes: any, lastPulledAt: number) {
+    async syncData(changes: any, lastPulledAt: number, storeOwnerId: string) {
         if (changes?.sales?.created?.length > 0) {
             await this.prisma.sale.createMany({
                 data: changes.sales.created.map((s: any) => ({
                     id: s.id,
+                    userId: storeOwnerId, // Always attributed to the store owner
                     total: s.total,
                     discountAmount: s.discount_amount || s.discountAmount || 0,
                     paymentType: s.payment_type || s.paymentType,
                     synced: true,
                     timestamp: s.timestamp ? new Date(s.timestamp) : new Date(),
                 })),
-                skipDuplicates: true
+                skipDuplicates: true,
             });
         }
 
@@ -30,22 +31,21 @@ export class SalesService {
                     quantity: si.quantity,
                     price: si.price,
                 })),
-                skipDuplicates: true
+                skipDuplicates: true,
             });
         }
 
         return { changes: {}, timestamp: Date.now() };
     }
 
-    async getDailySummary() {
+    async getDailySummary(storeOwnerId: string) {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
         const sales = await this.prisma.sale.findMany({
             where: {
-                timestamp: {
-                    gte: today,
-                },
+                userId: storeOwnerId,
+                timestamp: { gte: today },
             },
         });
 

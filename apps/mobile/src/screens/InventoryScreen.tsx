@@ -78,7 +78,8 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
     const [selectedPendingProduct, setSelectedPendingProduct] = useState<any>(null);
 
     const [permission, requestPermission] = useCameraPermissions();
-    const { token, userId } = useAuthStore();
+    const { token, userId, activeRole } = useAuthStore();
+    const isCashier = activeRole === 'CASHIER';
     const { isOnline } = useSyncStore();
     const { symbol, formatAmount } = useCurrency();
     const insets = useSafeAreaInsets();
@@ -411,9 +412,11 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                             </View>
                             <View className="flex-row gap-2">
                                 {activeTab === 'inStock' ? (
-                                    <TouchableOpacity onPress={() => handleEdit(item)} className="p-1.5 bg-lightBackground rounded-lg">
-                                        <Edit3 size={16} color="#64748B" />
-                                    </TouchableOpacity>
+                                    !isCashier && (
+                                        <TouchableOpacity onPress={() => handleEdit(item)} className="p-1.5 bg-lightBackground rounded-lg">
+                                            <Edit3 size={16} color="#64748B" />
+                                        </TouchableOpacity>
+                                    )
                                 ) : (
                                     <TouchableOpacity 
                                         onPress={() => { setSelectedPendingProduct(item); setShowAddQtySheet(true); }} 
@@ -422,7 +425,7 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                                         <Text className="text-white text-[10px] font-black">Add quantity</Text>
                                     </TouchableOpacity>
                                 )}
-                                {activeTab === 'inStock' && (
+                                {activeTab === 'inStock' && !isCashier && (
                                     <TouchableOpacity onPress={() => handleDelete(item)} className="p-1.5 bg-dangerLight rounded-lg">
                                         <Trash2 size={16} color="#EF4444" />
                                     </TouchableOpacity>
@@ -433,7 +436,8 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                 )}
             />
 
-            {/* FAB */}
+            {/* FAB — hidden from Cashiers */}
+            {!isCashier && (
             <View className="absolute bottom-6 right-6 items-end">
                 <TouchableOpacity 
                     onPress={handleOpenScanner}
@@ -448,6 +452,7 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                     <Plus size={28} color="white" />
                 </TouchableOpacity>
             </View>
+            )}
 
             {/* ADD QUANTITY MODAL */}
             <Modal visible={showAddQtySheet} transparent animationType="slide">

@@ -15,7 +15,8 @@ import {
     ShieldCheck,
     Wrench,
     ArrowLeftRight,
-    DoorOpen
+    DoorOpen,
+    Users
 } from 'lucide-react-native';
 
 import PersonalInfoScreen from './PersonalInfoScreen';
@@ -25,6 +26,7 @@ import SystemSettingsScreen from './SystemSettingsScreen';
 import HelpSupportScreen from './HelpSupportScreen';
 import DeleteAccountScreen from './DeleteAccountScreen';
 import DevToolsScreen from './DevToolsScreen';
+import StaffManagementScreen from './StaffManagementScreen';
 
 const MenuItem = ({ icon: Icon, color, label, onPress, sublabel, danger }: any) => (
     <TouchableOpacity 
@@ -103,6 +105,7 @@ export default function MoreScreen() {
     if (activeSubScreen === 'HelpSupport') return <HelpSupportScreen onBack={() => setActiveSubScreen(null)} />;
     if (activeSubScreen === 'DeleteAccount') return <DeleteAccountScreen onBack={() => setActiveSubScreen(null)} onConfirm={logout} />;
     if (activeSubScreen === 'DevTools') return <DevToolsScreen onBack={() => setActiveSubScreen(null)} />;
+    if (activeSubScreen === 'StaffManagement') return <StaffManagementScreen onBack={() => setActiveSubScreen(null)} />;
 
     return (
         <View className="flex-1 bg-lightBackground">
@@ -153,6 +156,13 @@ export default function MoreScreen() {
                                 label="Security" 
                                 sublabel="Password & authentication"
                                 onPress={() => setActiveSubScreen('Security')} 
+                            />
+                            <MenuItem 
+                                icon={Users} 
+                                color="#7C5CFC" 
+                                label="Staff Management" 
+                                sublabel="Add, view & remove your team"
+                                onPress={() => setActiveSubScreen('StaffManagement')} 
                             />
                         </View>
                     </View>

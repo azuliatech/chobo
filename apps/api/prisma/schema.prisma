@@ -25,6 +25,8 @@ model User {
   staffLinks   StaffLink[] @relation("StaffMember")
   // As an owner: all staff linked to this store
   storeStaff   StaffLink[] @relation("StoreOwner")
+  // Sales recorded under this owner's store
+  sales        Sale[]
 }
 
 model StaffLink {
@@ -82,6 +84,8 @@ model Customer {
 
 model Sale {
   id             String     @id @default(uuid())
+  userId         String?    // The store owner this sale belongs to
+  user           User?      @relation(fields: [userId], references: [id])
   total          Float
   discountAmount Float      @default(0)
   paymentType    String     // 'CASH', 'TRANSFER', 'POS', 'PAY_LATER'
@@ -94,6 +98,8 @@ model Sale {
   debts          Debt[]
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
+
+  @@index([userId])
 }
 
 model SaleItem {
