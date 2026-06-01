@@ -30,12 +30,6 @@
     },
     "plugins": [
       "expo-sqlite"
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "f3ec63a4-052a-4ed1-b2fc-2296f3caa3ef"
-      }
-    },
-    "owner": "bhuchee"
+    ]
   }
 }
