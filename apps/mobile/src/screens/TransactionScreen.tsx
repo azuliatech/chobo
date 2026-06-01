@@ -285,7 +285,17 @@ export default function TransactionScreen() {
                                         </View>
                                         <View className="flex-1">
                                             <Text className="font-bold text-sm text-textPrimary">{t.customer_name || 'Guest Customer'}</Text>
-                                            <Text className="text-textSecondary text-[10px] font-bold uppercase mt-1">{t.payment_type} · {formatTime(t.timestamp)}</Text>
+                                            <Text className="text-textSecondary text-[10px] font-bold uppercase mt-1">
+                                                {(() => {
+                                                    switch (t.payment_type) {
+                                                        case 'PAY_LATER': return 'Pay Later';
+                                                        case 'CASH': return 'Cash';
+                                                        case 'TRANSFER': return 'Transfer';
+                                                        case 'POS': return 'POS';
+                                                        default: return t.payment_type;
+                                                    }
+                                                })()} · {formatTime(t.timestamp)}
+                                            </Text>
                                         </View>
                                         <View className="items-end mr-3">
                                             <Text className="text-primary font-black text-sm">{formatAmount(t.total)}</Text>

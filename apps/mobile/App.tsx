@@ -1,6 +1,6 @@
 import './global.css';
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, Keyboard } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { initDatabase, getProducts, createProduct } from './src/db';
 import SellScreen from './src/screens/SellScreen';
@@ -31,6 +31,7 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [activeTab, setActiveTab] = useState('sell');
   const [initialBarcode, setInitialBarcode] = useState<string | null>(null);
+  const [isKeyboardVisible, setKeyboardVisible] = useState(false);
 
   const { token, userId, isReady: authReady, restoreToken } = useAuthStore();
   const { setIsOnline, isOnline } = useSyncStore();
@@ -41,6 +42,22 @@ export default function App() {
       .then(() => restoreToken())
       .then(() => setReady(true))
       .catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener(
+      'keyboardDidShow',
+      () => setKeyboardVisible(true)
+    );
+    const keyboardDidHideListener = Keyboard.addListener(
+      'keyboardDidHide',
+      () => setKeyboardVisible(false)
+    );
+
+    return () => {
+      keyboardDidShowListener.remove();
+      keyboardDidHideListener.remove();
+    };
   }, []);
 
   // Network listener using NetInfo for real-time updates
@@ -123,10 +140,10 @@ export default function App() {
 
   const renderScreen = () => {
     switch (activeTab) {
-      case 'sell':        return <SellScreen onNavigateToStock={navigateToStock} />;
+      case 'sell':        return <SellScreen onNavigateToStock={navigateToStock} onNavigateToOverview={() => setActiveTab('overview')} />;
       case 'inventory':   return <InventoryScreen initialBarcode={initialBarcode} onClearBarcode={clearInitialBarcode} />;
       case 'transaction': return <TransactionScreen />;
-      case 'overview':    return <OverviewScreen />;
+      case 'overview':    return <OverviewScreen onNavigateToSell={() => setActiveTab('sell')} />;
       case 'more':        return <MoreScreen />;
       default:            return <SellScreen onNavigateToStock={navigateToStock} />;
     }
@@ -139,30 +156,32 @@ export default function App() {
         {renderScreen()}
 
         {/* Bottom Tab Bar */}
-        <View style={styles.tabBar}>
-          {TABS.map(tab => {
-            const active = activeTab === tab.key;
-            const IconComponent = tab.Icon;
-            return (
-              <TouchableOpacity
-                key={tab.key}
-                style={styles.tab}
-                onPress={() => setActiveTab(tab.key)}
-                activeOpacity={0.7}
-              >
-                <IconComponent
-                  size={24}
-                  color={active ? '#16A34A' : '#64748B'}
-                  fill={active && tab.key === 'sell' ? '#16A34A' : 'none'}
-                  style={{ marginBottom: 4 }}
-                />
-                <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>
-                  {tab.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        {!isKeyboardVisible && (
+          <View style={styles.tabBar}>
+            {TABS.map(tab => {
+              const active = activeTab === tab.key;
+              const IconComponent = tab.Icon;
+              return (
+                <TouchableOpacity
+                  key={tab.key}
+                  style={styles.tab}
+                  onPress={() => setActiveTab(tab.key)}
+                  activeOpacity={0.7}
+                >
+                  <IconComponent
+                    size={24}
+                    color={active ? '#16A34A' : '#64748B'}
+                    fill={active && tab.key === 'sell' ? '#16A34A' : 'none'}
+                    style={{ marginBottom: 4 }}
+                  />
+                  <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>
+                    {tab.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
       </View>
     </SafeAreaProvider>
   );

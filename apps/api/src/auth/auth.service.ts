@@ -269,6 +269,15 @@ export class AuthService {
     }
 
     /**
+     * Checks if a phone number is already registered in the database.
+     */
+    async checkPhoneRegistered(phone: string): Promise<boolean> {
+        const formatted = phone.startsWith('+') ? phone : `+${phone.replace(/\D/g, '')}`;
+        const user = await this.prisma.user.findUnique({ where: { phone: formatted } });
+        return !!user;
+    }
+
+    /**
      * Returns all stores a user has access to (own + staff links).
      */
     async getMyStores(userId: string) {

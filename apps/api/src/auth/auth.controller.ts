@@ -56,6 +56,10 @@ export class AuthController {
         if (!body.phone) {
             throw new BadRequestException('Phone number is required');
         }
+        const exists = await this.authService.checkPhoneRegistered(body.phone);
+        if (exists) {
+            throw new BadRequestException('This phone number is already registered');
+        }
         try {
             const pinId = await this.smsService.sendOtp(body.phone);
             return { success: true, pinId };

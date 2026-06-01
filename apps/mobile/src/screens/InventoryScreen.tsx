@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getProducts, createProduct, updateProduct, updateProductQuantity, deleteProduct, getStockSummary } from '../db';
+import { pushSalesToBackend } from '../services/syncService';
 import { 
     Plus, 
     X, 
@@ -147,14 +148,17 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
             // 1. Check KashAm Shared Catalogue
             setLookupState('kasham');
             const res = await fetch(`${API_BASE_URL}/catalogue/lookup/${barcodeData}`);
-            if (res.ok) {
-                const data = await res.json();
-                if (data) {
-                    setName(data.name);
-                    if (data.imageUrl) setImageUri(data.imageUrl);
-                    setLookupState('done');
-                    setModalVisible(true);
-                    return;
+            if (res.ok && res.status !== 204) {
+                const contentType = res.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const data = await res.json();
+                    if (data) {
+                        setName(data.name);
+                        if (data.imageUrl) setImageUri(data.imageUrl);
+                        setLookupState('done');
+                        setModalVisible(true);
+                        return;
+                    }
                 }
             }
 
@@ -316,7 +320,7 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                 <View className="flex-1 bg-white p-4 rounded-3xl border border-border shadow-sm">
                     <Package size={20} color="#0F172A" />
                     <Text className="text-textPrimary font-black text-xl mt-2">{summary.total}</Text>
-                    <Text className="text-textSecondary text-[10px] font-bold uppercase tracking-tight">Total Stock</Text>
+                    <Text className="text-textSecondary text-[10px] font-bold uppercase tracking-tight">Total Products</Text>
                 </View>
                 <View className="flex-1 bg-accentLight p-4 rounded-3xl border border-accent/20 shadow-sm">
                     <AlertTriangle size={20} color="#92400E" />
@@ -481,10 +485,14 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                             <TouchableOpacity 
                                 onPress={async () => {
                                     if (!newQuantity) return;
-                                    await updateProductQuantity(selectedPendingProduct.id, parseInt(newQuantity));
+                                    await updateProductQuantity(selectedPendingProduct.id, parseInt(newQuantity, 10));
                                     setShowAddQtySheet(false);
                                     setNewQuantity('');
-                                    loadData();
+                                    setActiveTab('inStock');
+                                    await loadData();
+                                    if (isOnline) {
+                                        pushSalesToBackend();
+                                    }
                                 }}
                                 className="flex-2 bg-primary py-4 rounded-2xl items-center"
                             >

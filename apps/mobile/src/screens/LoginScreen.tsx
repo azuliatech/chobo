@@ -64,6 +64,8 @@ export default function LoginScreen() {
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [phoneError, setPhoneError] = useState('');
+    const [loginError, setLoginError] = useState('');
 
     // Biometric State
     const [biometricAvailable, setBiometricAvailable] = useState(false);
@@ -73,7 +75,8 @@ export default function LoginScreen() {
     const insets = useSafeAreaInsets();
 
     const getFullPhone = () => {
-        const cleaned = phone.replace(/^0+/, '');
+        const digitsOnly = phone.replace(/\D/g, '');
+        const cleaned = digitsOnly.replace(/^0+/, '');
         return `+${callingCode}${cleaned}`;
     };
 
@@ -106,12 +109,28 @@ export default function LoginScreen() {
                 setBiometricType('fingerprint');
             }
         };
+        const loadSavedCountry = async () => {
+            const saved = await AsyncStorage.getItem('countryCode');
+            if (saved) {
+                setCountryCode(saved as CountryCode);
+                const codes: Record<string, string> = {
+                    NG: '234',
+                    GH: '233',
+                    GB: '44',
+                    US: '1',
+                    CA: '1',
+                };
+                setCallingCode(codes[saved] ?? '234');
+            }
+        };
         checkBiometric();
+        loadSavedCountry();
     }, []);
 
     const handleLogin = async () => {
+        setLoginError('');
         if (!phone || !password) {
-            Alert.alert('Error', 'Please enter both phone and password');
+            setLoginError('Please enter both phone and password');
             return;
         }
 
@@ -130,10 +149,10 @@ export default function LoginScreen() {
                 await saveCountryCode(serverCountryCode);
                 await login(data.access_token, data.refresh_token, data.user_id, data.shop_name, data.stores || []);
             } else {
-                Alert.alert('Login Failed', data.message || 'Invalid credentials');
+                setLoginError(data.message || 'Invalid credentials');
             }
         } catch (e) {
-            Alert.alert('Network Error', 'Could not reach the server.');
+            setLoginError('Could not reach the server. Please check your connection.');
         } finally {
             setLoading(false);
         }
@@ -238,8 +257,9 @@ export default function LoginScreen() {
     };
 
     const handleSendOtp = async () => {
+        setPhoneError('');
         if (!phone) {
-            Alert.alert('Error', 'Please enter your phone number');
+            setPhoneError('Please enter your phone number');
             return;
         }
 
@@ -258,10 +278,10 @@ export default function LoginScreen() {
                 setOtp(['', '', '', '', '', '']);
                 setStep('signup_otp');
             } else {
-                Alert.alert('Error', data.message || 'Could not send verification code.');
+                setPhoneError(data.message || 'Could not send verification code.');
             }
         } catch (e) {
-            Alert.alert('Network Error', 'Could not reach the server.');
+            setPhoneError('Could not reach the server. Please check your connection.');
         } finally {
             setLoading(false);
         }
@@ -335,7 +355,7 @@ export default function LoginScreen() {
                     <Store size={48} color="#16A34A" />
                 </View>
                 <Text className="text-white font-black text-5xl tracking-tight text-center mb-2">KashAm</Text>
-                <Text className="text-white/80 font-bold text-base text-center max-w-[250px]">Smart POS & Inventory System for modern businesses.</Text>
+                <Text className="text-white/80 font-bold text-base text-center max-w-[280px]">Know your money. Track your stock. Never forget who owes you.</Text>
             </View>
 
             <View className="mb-12">
@@ -383,12 +403,15 @@ export default function LoginScreen() {
                         placeholderTextColor="#94A3B8"
                         keyboardType="phone-pad"
                         value={phone}
-                        onChangeText={setPhone}
+                        onChangeText={(t) => {
+                            setPhone(t);
+                            if (loginError) setLoginError('');
+                        }}
                     />
                 </View>
             </View>
 
-            <View className="mb-10">
+            <View className="mb-8">
                 <Text className="text-textSecondary text-xs font-black uppercase mb-2">Password</Text>
                 <View className="flex-row items-center bg-white border border-border rounded-xl px-4 h-14 shadow-sm">
                     <Lock size={20} color="#64748B" />
@@ -398,13 +421,20 @@ export default function LoginScreen() {
                         placeholderTextColor="#94A3B8"
                         secureTextEntry={!showPassword}
                         value={password}
-                        onChangeText={setPassword}
+                        onChangeText={(t) => {
+                            setPassword(t);
+                            if (loginError) setLoginError('');
+                        }}
                     />
                     <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
                         {showPassword ? <EyeOff size={20} color="#64748B" /> : <Eye size={20} color="#64748B" />}
                     </TouchableOpacity>
                 </View>
             </View>
+
+            {loginError ? (
+                <Text className="text-red-500 font-bold text-sm mb-6 text-center">{loginError}</Text>
+            ) : null}
 
             <TouchableOpacity 
                 onPress={handleLogin}
@@ -473,11 +503,18 @@ export default function LoginScreen() {
                         placeholderTextColor="#94A3B8"
                         keyboardType="phone-pad"
                         value={phone}
-                        onChangeText={setPhone}
+                        onChangeText={(t) => {
+                            setPhone(t);
+                            if (phoneError) setPhoneError('');
+                        }}
                         autoFocus
                     />
                 </View>
             </View>
+
+            {phoneError ? (
+                <Text className="text-red-500 font-bold text-sm mb-6 text-center">{phoneError}</Text>
+            ) : null}
 
             <TouchableOpacity 
                 onPress={handleSendOtp}

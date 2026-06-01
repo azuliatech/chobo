@@ -32,16 +32,25 @@ export default function AddProductSheet({ visible, onClose, onSuccess, initialBa
     const [uploading, setUploading] = useState(false);
     const [saving, setSaving] = useState(false);
 
+    // Validation error states
+    const [nameError, setNameError] = useState('');
+    const [priceError, setPriceError] = useState('');
+    const [stockError, setStockError] = useState('');
+
     const handleGlobalLookup = async (barcodeData: string) => {
         if (!barcodeData || !isOnline) return;
         try {
             const res = await fetch(`${API_URL}/catalogue/lookup/${barcodeData}`);
-            if (res.ok) {
-                const data = await res.json();
-                if (data) {
-                    setName(data.name);
-                    if (data.imageUrl) setLocalImageUri(data.imageUrl);
-                    return;
+            if (res.ok && res.status !== 204) {
+                const contentType = res.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const data = await res.json();
+                    if (data) {
+                        setName(data.name);
+                        if (nameError) setNameError('');
+                        if (data.imageUrl) setLocalImageUri(data.imageUrl);
+                        return;
+                    }
                 }
             }
         } catch (e) {
@@ -75,13 +84,36 @@ export default function AddProductSheet({ visible, onClose, onSuccess, initialBa
 
     const resetForm = () => {
         setName(''); setPrice(''); setStock(''); setBarcode(''); setLocalImageUri(null);
+        setNameError(''); setPriceError(''); setStockError('');
     };
 
     const handleSave = async () => {
-        if (!name || !price || !stock) {
-            Alert.alert('Error', 'Please fill all required fields');
-            return;
+        let valid = true;
+        setNameError('');
+        setPriceError('');
+        setStockError('');
+
+        if (!name.trim()) {
+            setNameError('Product name is required');
+            valid = false;
         }
+        if (!price.trim()) {
+            setPriceError('Price is required');
+            valid = false;
+        } else if (isNaN(parseFloat(price)) || parseFloat(price) <= 0) {
+            setPriceError('Enter a valid price');
+            valid = false;
+        }
+        if (!stock.trim()) {
+            setStockError('Quantity is required');
+            valid = false;
+        } else if (isNaN(parseInt(stock, 10)) || parseInt(stock, 10) < 0) {
+            setStockError('Enter a valid quantity');
+            valid = false;
+        }
+
+        if (!valid) return;
+
         setSaving(true);
         try {
             let imageUrl: string | null = null;
@@ -157,26 +189,34 @@ export default function AddProductSheet({ visible, onClose, onSuccess, initialBa
                         </TouchableOpacity>
 
                         <TextInput placeholderTextColor="#94A3B8"
-                            className="bg-lightBackground border border-border p-4 rounded-xl font-bold mb-3 text-textPrimary"
+                            className={`bg-lightBackground border p-4 rounded-xl font-bold mb-1 text-textPrimary ${nameError ? 'border-red-500' : 'border-border'}`}
                             placeholder="Product Name"
                             value={name}
-                            onChangeText={setName}
+                            onChangeText={(t) => { setName(t); if (nameError) setNameError(''); }}
                         />
+                        {nameError ? <Text className="text-red-500 font-bold text-[10px] mb-3 ml-1">{nameError}</Text> : <View className="h-2" />}
+
                         <View className="flex-row gap-3 mb-3">
-                            <TextInput placeholderTextColor="#94A3B8"
-                                className="flex-1 bg-lightBackground border border-border p-4 rounded-xl font-bold text-textPrimary"
-                                placeholder="Price"
-                                keyboardType="numeric"
-                                value={price}
-                                onChangeText={setPrice}
-                            />
-                            <TextInput placeholderTextColor="#94A3B8"
-                                className="flex-1 bg-lightBackground border border-border p-4 rounded-xl font-bold text-textPrimary"
-                                placeholder="Quantity"
-                                keyboardType="numeric"
-                                value={stock}
-                                onChangeText={setStock}
-                            />
+                            <View className="flex-1">
+                                <TextInput placeholderTextColor="#94A3B8"
+                                    className={`w-full bg-lightBackground border p-4 rounded-xl font-bold text-textPrimary ${priceError ? 'border-red-500' : 'border-border'}`}
+                                    placeholder="Price"
+                                    keyboardType="numeric"
+                                    value={price}
+                                    onChangeText={(t) => { setPrice(t); if (priceError) setPriceError(''); }}
+                                />
+                                {priceError ? <Text className="text-red-500 font-bold text-[10px] mt-1 ml-1">{priceError}</Text> : null}
+                            </View>
+                            <View className="flex-1">
+                                <TextInput placeholderTextColor="#94A3B8"
+                                    className={`w-full bg-lightBackground border p-4 rounded-xl font-bold text-textPrimary ${stockError ? 'border-red-500' : 'border-border'}`}
+                                    placeholder="Quantity"
+                                    keyboardType="numeric"
+                                    value={stock}
+                                    onChangeText={(t) => { setStock(t); if (stockError) setStockError(''); }}
+                                />
+                                {stockError ? <Text className="text-red-500 font-bold text-[10px] mt-1 ml-1">{stockError}</Text> : null}
+                            </View>
                         </View>
                         <View className="flex-row items-center bg-lightBackground border border-border rounded-xl pr-2 mb-6">
                             <TextInput placeholderTextColor="#94A3B8"

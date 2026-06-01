@@ -45,13 +45,15 @@ import {
     Pencil,
     Fingerprint,
     PackageSearch,
-    Package
+    Package,
+    Sparkles
 } from 'lucide-react-native';
 import { useSyncStore } from '../store/syncStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatCurrency, getInitials } from '../utils/format';
 import NotificationsSheet from '../components/NotificationsSheet';
 import AddProductSheet from '../components/AddProductSheet';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -77,11 +79,11 @@ export const Header = ({ title, subtitle, showBell = true }: { title: string, su
 
     return (
         <View style={{ paddingTop: insets.top + 4 }} className="bg-white px-6 pb-2 border-b border-border flex-row items-center justify-between z-50">
-            <View>
+            <View style={{ flex: 1, marginRight: 16 }}>
                 {/* TODO: Fetch store name from onboarding context */}
-                <Text className="text-textPrimary font-black text-xl">{title}</Text>
+                <Text className="text-textPrimary font-black text-xl" numberOfLines={1} ellipsizeMode="tail">{title}</Text>
                 {subtitle && subtitle !== 'Offline ready' ? (
-                     <Text className="text-textSecondary text-[10px] font-bold uppercase tracking-tight">{subtitle}</Text>
+                     <Text className="text-textSecondary text-[10px] font-bold uppercase tracking-tight" numberOfLines={1} ellipsizeMode="tail">{subtitle}</Text>
                 ) : null}
             </View>
             <View className="flex-row items-center gap-4">
@@ -106,13 +108,17 @@ export const Header = ({ title, subtitle, showBell = true }: { title: string, su
 };
 
 // --- MAIN SCREEN ---
-export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: (barcode: string) => void }) {
+export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: { onNavigateToStock?: (barcode: string) => void; onNavigateToOverview?: () => void }) {
     const { userId, businessName } = useAuthStore();
     const { symbol: currencySymbol, formatAmount } = useCurrency();
     const [products, setProducts] = useState<any[]>([]);
     const [frequentProducts, setFrequentProducts] = useState<any[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [filteredProducts, setFilteredProducts] = useState<any[]>([]);
+    
+    // Onboarding States
+    const [hasFirstSaleCompleted, setHasFirstSaleCompleted] = useState<boolean>(true);
+    const [celebrationVisible, setCelebrationVisible] = useState(false);
     
     // Scanner State
     const [scannerVisible, setScannerVisible] = useState(false);
@@ -161,6 +167,14 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
     }, [userId]);
 
     useEffect(() => { loadData(); }, [loadData]);
+
+    useEffect(() => {
+        const checkFirstSale = async () => {
+            const val = await AsyncStorage.getItem('hasFirstSaleCompleted');
+            setHasFirstSaleCompleted(val === 'true');
+        };
+        checkFirstSale();
+    }, []);
 
     useEffect(() => {
         const checkBiometricPrompt = async () => {
@@ -358,6 +372,14 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
             setSelectedPaymentType(null);
             loadData();
             setTimeout(() => setSuccessVisible(false), 2000);
+
+            if (!hasFirstSaleCompleted) {
+                await AsyncStorage.setItem('hasFirstSaleCompleted', 'true');
+                setHasFirstSaleCompleted(true);
+                setTimeout(() => {
+                    setCelebrationVisible(true);
+                }, 2200);
+            }
         } catch (e) {
             console.error('Sale error', e);
             Alert.alert('Error', 'Could not record sale');
@@ -450,6 +472,17 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
             </View>
 
             <ScrollView className="flex-1" contentContainerStyle={{ padding: 24, paddingBottom: 150 }}>
+                {/* Step 2 Onboarding Banner */}
+                {products.length > 0 && !hasFirstSaleCompleted && (
+                    <View className="bg-primary p-4 rounded-2xl flex-row items-center justify-between mb-6 shadow-sm border border-primary/20">
+                        <View className="flex-1 mr-4">
+                            <Text className="text-white font-black text-sm">Step 2: Let's make your first sale!</Text>
+                            <Text className="text-white/80 font-bold text-xs mt-1">Tap your product card below to add it to the cart, then tap Checkout.</Text>
+                        </View>
+                        <Sparkles size={20} color="white" />
+                    </View>
+                )}
+
                 {/* FREQUENTLY SOLD */}
                 {frequentProducts.length > 0 && !searchQuery && (
                     <View style={{ backgroundColor: '#16A34A' }} className="rounded-2xl p-4 mb-6">
@@ -488,7 +521,36 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
                     {filteredProducts.map(item => <React.Fragment key={item.id}>{renderProductCard({item})}</React.Fragment>)}
                 </View>
                 
-                {filteredProducts.length === 0 && (
+                {/* Onboarding Step 1 Empty State */}
+                {products.length === 0 ? (
+                    <View className="bg-white rounded-[32px] p-6 border border-border shadow-sm my-6">
+                        <View className="bg-[#DCFCE7] w-12 h-12 rounded-2xl items-center justify-center mb-4">
+                            <Package size={24} color="#16A34A" />
+                        </View>
+                        <Text className="text-textPrimary font-black text-2xl mb-2">Step 1: Add your first product</Text>
+                        <Text className="text-textSecondary font-bold text-sm mb-6 leading-5">
+                            Every business starts with inventory. Let's add your very first product to KashAm so you can sell it.
+                        </Text>
+                        <View className="flex-row gap-4">
+                            <TouchableOpacity 
+                                onPress={() => setScannerVisible(true)}
+                                className="flex-1 bg-primary py-3.5 rounded-xl items-center flex-row justify-center shadow-sm active:bg-[#15803D]"
+                            >
+                                <ScanLine size={16} color="white" style={{ marginRight: 8 }} />
+                                <Text className="text-white font-black text-xs">Scan Barcode</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                onPress={() => setAddProductVisible(true)}
+                                className="flex-1 bg-lightBackground border border-border py-3.5 rounded-xl items-center flex-row justify-center active:bg-border/20"
+                            >
+                                <Plus size={16} color="#0F172A" style={{ marginRight: 8 }} />
+                                <Text className="text-textPrimary font-black text-xs">Add Manually</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                ) : null}
+
+                {products.length > 0 && filteredProducts.length === 0 && (
                     <View className="items-center justify-center py-12">
                         <Search size={40} color="#CBD5E1" />
                         <Text className="text-textSecondary font-bold mt-4">No products found</Text>
@@ -705,63 +767,72 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
 
                         <ScrollView className="flex-1 p-6" showsVerticalScrollIndicator={false}>
                             {/* ITEM LIST WITH PRICE OVERRIDE */}
-                            {items.map(item => (
-                                <View key={item.productId} className="flex-row items-center justify-between mb-4 bg-white border border-border p-4 rounded-3xl shadow-sm">
-                                    <View className="flex-row items-center flex-1 pr-4">
-                                        <View className="w-10 h-10 rounded-full bg-lightBackground items-center justify-center mr-3 border border-border/50">
-                                            <Text className="text-textPrimary font-black text-sm">{getInitials(item.name)}</Text>
+                            {items.map(item => {
+                                const product = products.find((p: any) => p.id === item.productId);
+                                return (
+                                    <View key={item.productId} className="flex-row items-center justify-between mb-4 bg-white border border-border p-4 rounded-3xl shadow-sm">
+                                        <View className="flex-row items-center flex-1 pr-4">
+                                            <View className="w-10 h-10 rounded-full bg-lightBackground items-center justify-center mr-3 border border-border/50 overflow-hidden">
+                                                {product?.image_uri ? (
+                                                    <Image source={{ uri: product.image_uri }} className="w-full h-full" resizeMode="cover" />
+                                                ) : (
+                                                    <Text className="text-textPrimary font-black text-xs">{getInitials(item.name)}</Text>
+                                                )}
+                                            </View>
+                                            <View className="flex-1">
+                                                <Text className="font-bold text-sm text-textPrimary mb-1" numberOfLines={2}>{item.name}</Text>
+                                                {/* Price Edit Logic */}
+                                                {editingPriceId === item.productId ? (
+                                                    <TextInput placeholderTextColor="#94A3B8" 
+                                                        autoFocus
+                                                        className="text-primary font-black text-sm border-b border-primary p-0 m-0 w-20"
+                                                        keyboardType="numeric"
+                                                        value={tempPrice}
+                                                        onChangeText={setTempPrice}
+                                                        onBlur={() => {
+                                                            const p = parseFloat(tempPrice);
+                                                            updateQuantity(item.productId, item.quantity, isNaN(p) ? item.price : p);
+                                                            setEditingPriceId(null);
+                                                        }}
+                                                    />
+                                                ) : (
+                                                    <TouchableOpacity className="flex-row items-center gap-1.5" onPress={() => { setEditingPriceId(item.productId); setTempPrice(item.price.toString()); }}>
+                                                        {item.price !== (product?.price ?? item.price) && (
+                                                            <Text className="text-textSecondary text-xs line-through">
+                                                                {formatAmount(product?.price ?? 0)}
+                                                            </Text>
+                                                        )}
+                                                        <Text className="text-primary font-black text-sm">{formatAmount(item.price)}</Text>
+                                                        <View className="bg-lightBackground p-1 rounded-full">
+                                                            <Pencil size={10} color="#64748B" />
+                                                        </View>
+                                                    </TouchableOpacity>
+                                                )}
+                                            </View>
                                         </View>
-                                        <View className="flex-1">
-                                            <Text className="font-bold text-sm text-textPrimary mb-1" numberOfLines={2}>{item.name}</Text>
-                                            {/* Price Edit Logic */}
-                                            {editingPriceId === item.productId ? (
-                                                <TextInput placeholderTextColor="#94A3B8" 
-                                                    autoFocus
-                                                    className="text-primary font-black text-sm border-b border-primary p-0 m-0 w-20"
-                                                    keyboardType="numeric"
-                                                    value={tempPrice}
-                                                    onChangeText={setTempPrice}
-                                                    onBlur={() => {
-                                                        const p = parseFloat(tempPrice);
-                                                        updateQuantity(item.productId, item.quantity, isNaN(p) ? item.price : p);
-                                                        setEditingPriceId(null);
-                                                    }}
-                                                />
-                                            ) : (
-                                                <TouchableOpacity className="flex-row items-center gap-1.5" onPress={() => { setEditingPriceId(item.productId); setTempPrice(item.price.toString()); }}>
-                                                    {item.price !== (products.find((p: any)=>p.id===item.productId)?.price ?? item.price) && (
-                                                        <Text className="text-textSecondary text-xs line-through">
-                                                            {currencySymbol}{products.find((p: any)=>p.id===item.productId)?.price ?? ''}
-                                                        </Text>
-                                                    )}
-                                                    <Text className="text-primary font-black text-sm">{currencySymbol}{item.price}</Text>
-                                                    <View className="bg-lightBackground p-1 rounded-full">
-                                                        <Pencil size={10} color="#64748B" />
-                                                    </View>
-                                                </TouchableOpacity>
-                                            )}
+                                        
+                                        <View className="flex-row items-center bg-lightBackground rounded-full border border-border p-1">
+                                            <TouchableOpacity onPress={() => handleUpdateQuantity(item.productId, -1)} className="w-8 h-8 rounded-full bg-danger items-center justify-center shadow-sm">
+                                                <Minus size={16} color="white" />
+                                            </TouchableOpacity>
+                                            <Text className="font-black text-sm w-8 text-center text-textPrimary">{item.quantity}</Text>
+                                            <TouchableOpacity onPress={() => handleUpdateQuantity(item.productId, 1)} className="w-8 h-8 rounded-full bg-primary items-center justify-center shadow-sm">
+                                                <Plus size={16} color="white" />
+                                            </TouchableOpacity>
                                         </View>
                                     </View>
-                                    
-                                    <View className="flex-row items-center bg-lightBackground rounded-full border border-border p-1">
-                                        <TouchableOpacity onPress={() => handleUpdateQuantity(item.productId, -1)} className="w-8 h-8 rounded-full bg-danger items-center justify-center shadow-sm">
-                                            <Minus size={16} color="white" />
-                                        </TouchableOpacity>
-                                        <Text className="font-black text-sm w-8 text-center text-textPrimary">{item.quantity}</Text>
-                                        <TouchableOpacity onPress={() => handleUpdateQuantity(item.productId, 1)} className="w-8 h-8 rounded-full bg-primary items-center justify-center shadow-sm">
-                                            <Plus size={16} color="white" />
-                                        </TouchableOpacity>
-                                    </View>
-                                </View>
-                            ))}
+                                );
+                            })}
 
                             <View className="mt-4 bg-cardSurface p-5 rounded-3xl border border-primary/20">
                                 <Text className="text-textSecondary text-xs font-black uppercase mb-2">Total</Text>
                                 <View className="flex-row items-center justify-between">
                                     <View>
-                                        <Text className="text-primary font-black text-3xl">{currencySymbol}{totalEditMode ? finalPaidAmount : formatCurrency(total).replace(currencySymbol,'')}</Text>
-                                        {totalEditMode && parseFloat(finalPaidAmount) !== total && (
-                                            <Text style={{ color: '#64748B', fontSize: 13, textDecorationLine: 'line-through', marginTop: 2 }}>{currencySymbol}{total}</Text>
+                                        <Text className="text-primary font-black text-3xl">
+                                            {totalEditMode ? formatCurrency(parseFloat(finalPaidAmount) || 0, currencySymbol) : formatAmount(total)}
+                                        </Text>
+                                        {totalEditMode && (parseFloat(finalPaidAmount) || 0) !== total && (
+                                            <Text style={{ color: '#64748B', fontSize: 13, textDecorationLine: 'line-through', marginTop: 2 }}>{formatAmount(total)}</Text>
                                         )}
                                     </View>
                                     <TouchableOpacity onPress={() => { setTotalEditMode(!totalEditMode); if (!totalEditMode) setFinalPaidAmount(total.toString()); }} className="p-2">
@@ -828,7 +899,9 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
                                 {saleLoading ? (
                                     <ActivityIndicator color="white" />
                                 ) : (
-                                    <Text className="text-white font-black text-lg">Confirm {currencySymbol}{totalEditMode ? (finalPaidAmount || total) : formatCurrency(total).replace(currencySymbol,'')}</Text>
+                                    <Text className="text-white font-black text-lg">
+                                        Confirm {totalEditMode ? formatCurrency(parseFloat(finalPaidAmount) || total, currencySymbol) : formatAmount(total)}
+                                    </Text>
                                 )}
                             </TouchableOpacity>
                         </View>
@@ -868,6 +941,37 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
                     <CheckCircle size={100} color="white" />
                     <Text className="text-white font-black text-3xl mt-4">SALE RECORDED</Text>
                 </View>
+            )}
+
+            {celebrationVisible && (
+                <Modal visible={celebrationVisible} transparent animationType="fade">
+                    <View className="flex-1 bg-black/60 items-center justify-center px-6">
+                        <View className="bg-white rounded-[40px] p-8 w-full items-center shadow-2xl">
+                            <View className="w-20 h-20 bg-[#DCFCE7] rounded-full items-center justify-center mb-6">
+                                <Sparkles size={40} color="#16A34A" />
+                            </View>
+                            <Text className="text-textPrimary font-black text-3xl text-center mb-2">🎉 Congratulations!</Text>
+                            <Text className="text-textSecondary font-bold text-sm text-center mb-8 leading-6">
+                                You just made your first KashAm sale! Your inventory has been updated automatically. Now let's see your real-time business profits.
+                            </Text>
+                            <TouchableOpacity 
+                                onPress={() => {
+                                    setCelebrationVisible(false);
+                                    if (onNavigateToOverview) onNavigateToOverview();
+                                }}
+                                className="bg-primary w-full py-4 rounded-2xl items-center justify-center shadow-lg shadow-primary/30"
+                            >
+                                <Text className="text-white font-black text-base">Check my earnings in Overview →</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                onPress={() => setCelebrationVisible(false)}
+                                className="mt-4"
+                            >
+                                <Text className="text-textSecondary font-bold text-sm">Keep Selling</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </Modal>
             )}
         </View>
     );
