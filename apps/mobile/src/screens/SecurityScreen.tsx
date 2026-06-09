@@ -1,45 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, TextInput, ScrollView, Switch } from 'react-native';
-import { ArrowLeft, Lock, Smartphone, ShieldCheck, Fingerprint } from 'lucide-react-native';
-import * as LocalAuthentication from 'expo-local-authentication';
-import * as SecureStore from 'expo-secure-store';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, TextInput, ScrollView } from 'react-native';
+import { ArrowLeft, Lock, Smartphone, ShieldCheck } from 'lucide-react-native';
 
 export default function SecurityScreen({ onBack }: { onBack: () => void }) {
-    const [biometricSupported, setBiometricSupported] = useState(false);
-    const [biometricEnabled, setBiometricEnabled] = useState(false);
-    
     const [currentPass, setCurrentPass] = useState('');
     const [newPass, setNewPass] = useState('');
-
-    useEffect(() => {
-        (async () => {
-            const compatible = await LocalAuthentication.hasHardwareAsync();
-            setBiometricSupported(compatible);
-            const enabled = await SecureStore.getItemAsync('biometricEnabled');
-            setBiometricEnabled(enabled === 'true');
-        })();
-    }, []);
-
-    const toggleBiometric = async (val: boolean) => {
-        if (val) {
-            const result = await LocalAuthentication.authenticateAsync({
-                promptMessage: 'Authenticate to enable biometric login'
-            });
-            if (result.success) {
-                setBiometricEnabled(true);
-                await SecureStore.setItemAsync('biometricEnabled', 'true');
-                const userId = await AsyncStorage.getItem('userId');
-                if (userId) {
-                    await SecureStore.setItemAsync('biometricUserId', userId);
-                }
-            }
-        } else {
-            setBiometricEnabled(false);
-            await SecureStore.deleteItemAsync('biometricEnabled');
-            await SecureStore.deleteItemAsync('biometricUserId');
-        }
-    };
 
     return (
         <View className="flex-1 bg-lightBackground">
@@ -51,26 +16,6 @@ export default function SecurityScreen({ onBack }: { onBack: () => void }) {
             </View>
 
             <ScrollView className="flex-1 p-6" showsVerticalScrollIndicator={false}>
-                {biometricSupported && (
-                    <View className="bg-white rounded-3xl p-6 border border-border shadow-sm mb-6 flex-row items-center justify-between">
-                        <View className="flex-row items-center flex-1 pr-4">
-                            <View className="w-10 h-10 bg-primaryLight rounded-xl items-center justify-center mr-4">
-                                <Fingerprint size={20} color="#16A34A" />
-                            </View>
-                            <View className="flex-1">
-                                <Text className="font-bold text-textPrimary">Biometric Login</Text>
-                                <Text className="text-[10px] text-textSecondary font-bold mt-1 uppercase">Use Face ID / Touch ID</Text>
-                            </View>
-                        </View>
-                        <Switch
-                            value={biometricEnabled}
-                            onValueChange={toggleBiometric}
-                            trackColor={{ false: '#CBD5E1', true: '#16A34A' }}
-                            thumbColor="white"
-                        />
-                    </View>
-                )}
-
                 <View className="bg-white rounded-3xl p-6 border border-border shadow-sm mb-6">
                     <View className="flex-row items-center mb-6">
                         <Lock size={20} color="#0F172A" />

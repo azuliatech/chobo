@@ -45,6 +45,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (token) {
+      setActiveTab('sell');
+    }
+  }, [token]);
+
+  useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
       'keyboardDidShow',
       () => setKeyboardVisible(true)

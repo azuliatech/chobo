@@ -278,6 +278,20 @@ export class AuthService {
     }
 
     /**
+     * Resets the password of a user by phone number.
+     */
+    async resetPassword(phone: string, pass: string) {
+        const formatted = phone.startsWith('+') ? phone : `+${phone.replace(/\D/g, '')}`;
+        const salt = await bcrypt.genSalt();
+        const hashedPassword = await bcrypt.hash(pass, salt);
+        await this.prisma.user.update({
+            where: { phone: formatted },
+            data: { password: hashedPassword },
+        });
+        return { success: true };
+    }
+
+    /**
      * Returns all stores a user has access to (own + staff links).
      */
     async getMyStores(userId: string) {

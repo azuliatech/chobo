@@ -86,6 +86,45 @@ export class AuthController {
         return { success: true };
     }
 
+    @HttpCode(HttpStatus.OK)
+    @Post('forgot-password')
+    async forgotPassword(@Body() body: Record<string, any>) {
+        if (!body.phone) {
+            throw new BadRequestException('Phone number is required');
+        }
+        const exists = await this.authService.checkPhoneRegistered(body.phone);
+        if (!exists) {
+            throw new BadRequestException('This phone number is not registered');
+        }
+        try {
+            const formatted = body.phone.startsWith('+') ? body.phone : `+${body.phone.replace(/\D/g, '')}`;
+            const pinId = await this.smsService.sendOtp(formatted);
+            return { success: true, pinId };
+        } catch (e: any) {
+            throw new BadRequestException(e.message || 'Could not send SMS verification code');
+        }
+    }
+
+    @HttpCode(HttpStatus.OK)
+    @Post('reset-password')
+    async resetPassword(@Body() body: Record<string, any>) {
+        const pinId = body.pin_id || body.pinId;
+        const pin = body.pin;
+        const phone = body.phone;
+        const newPassword = body.newPassword || body.password;
+
+        if (!pinId || !pin || !phone || !newPassword) {
+            throw new BadRequestException('Phone, Pin ID, verification code, and new password are required');
+        }
+
+        const isValid = await this.smsService.verifyOtp(pinId, pin);
+        if (!isValid) {
+            throw new UnauthorizedException('Verification code is invalid or expired');
+        }
+
+        return this.authService.resetPassword(phone, newPassword);
+    }
+
     // ---- Staff Management (Owner-only routes) ----
 
     /**

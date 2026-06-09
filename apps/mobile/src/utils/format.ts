@@ -29,6 +29,7 @@ export const formatTime = (timestamp: number) => {
     const d = new Date(timestamp);
     return d.toLocaleTimeString('en-NG', {
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
+        hour12: true
     });
 };

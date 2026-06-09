@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, FlatList, TextInput, Modal, ActivityIndicator, Alert, KeyboardAvoidingView, Platform } from 'react-native';
-import { getTransactionHistory, getDailyStats, getOutstandingDebts, markDebtPaid, createPaymentLog, getSaleItems } from '../db';
+import { View, Text, ScrollView, TouchableOpacity, FlatList, TextInput, Modal, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Share } from 'react-native';
+import { getTransactionHistory, getDailyStats, getOutstandingDebts, markDebtPaid, createPaymentLog, getSaleItems, getProducts, updateProductQuantity, recordDebtPayment } from '../db';
 import { Header } from './SellScreen';
 import { formatCurrency, formatDate, formatTime } from '../utils/format';
 import { 
@@ -48,6 +48,27 @@ export default function TransactionScreen() {
     const [logNotes, setLogNotes] = useState('');
     const [logLoading, setLogLoading] = useState(false);
 
+    // Date filter state
+    const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'yesterday' | '7days' | '30days'>('all');
+    const [showDateDropdown, setShowDateDropdown] = useState(false);
+
+    // Debt Details Modal Sheet State
+    const [selectedDebt, setSelectedDebt] = useState<any | null>(null);
+    const [selectedDebtItems, setSelectedDebtItems] = useState<any[]>([]);
+    const [debtDetailsModal, setDebtDetailsModal] = useState(false);
+    
+    // Partial payment fields inside debt details modal
+    const [showPartialInput, setShowPartialInput] = useState(false);
+    const [partialAmount, setPartialAmount] = useState('');
+    const [partialLoading, setPartialLoading] = useState(false);
+
+    // Manual Payment Log Stock Deduction State
+    const [dbProducts, setDbProducts] = useState<any[]>([]);
+    const [deductStock, setDeductStock] = useState(false);
+    const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
+    const [productQuantity, setProductQuantity] = useState('1');
+    const [showProductSelector, setShowProductSelector] = useState(false);
+
     const { userId, businessName } = useAuthStore();
     const { symbol: currencySymbol, formatAmount } = useCurrency();
     const insets = useSafeAreaInsets();
@@ -61,14 +82,16 @@ export default function TransactionScreen() {
         if (!userId) return;
         setLoading(true);
         try {
-            const [tRows, dRows, sData] = await Promise.all([
+            const [tRows, dRows, sData, pRows] = await Promise.all([
                 getTransactionHistory(userId),
                 getOutstandingDebts(userId),
-                getDailyStats(userId, 'today')
+                getDailyStats(userId, 'today'),
+                getProducts(userId)
             ]);
             setTransactions(tRows);
             setDebts(dRows);
             setStats(sData);
+            setDbProducts(pRows || []);
         } catch (e) {
             console.error(e);
         } finally {
@@ -78,14 +101,149 @@ export default function TransactionScreen() {
 
     useEffect(() => { loadData(); }, [loadData]);
 
-    const handleMarkPaid = async (debtId: string) => {
-        Alert.alert('Mark as Paid', 'Has this customer paid in full?', [
+    const isWithinDateRange = useCallback((timestamp: number) => {
+        const date = new Date(timestamp);
+        const now = new Date();
+        
+        switch (dateFilter) {
+            case 'today': {
+                const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+                return timestamp >= startOfToday;
+            }
+            case 'yesterday': {
+                const startOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
+                const endOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+                return timestamp >= startOfYesterday && timestamp < endOfYesterday;
+            }
+            case '7days': {
+                const sevenDaysAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+                return timestamp >= sevenDaysAgo;
+            }
+            case '30days': {
+                const thirtyDaysAgo = now.getTime() - 30 * 24 * 60 * 60 * 1000;
+                return timestamp >= thirtyDaysAgo;
+            }
+            case 'all':
+            default:
+                return true;
+        }
+    }, [dateFilter]);
+
+    // ── Derived / filtered lists ──────────────────────────────────────────────
+    const filteredTransactions = React.useMemo(() => {
+        let list = transactions.filter(t => isWithinDateRange(t.timestamp));
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            list = list.filter(t =>
+                (t.customer_name || '').toLowerCase().includes(q) ||
+                (t.customer_phone || '').includes(searchQuery)
+            );
+        }
+        return list;
+    }, [transactions, searchQuery, isWithinDateRange]);
+
+    const filteredDebts = React.useMemo(() => {
+        let list = debts;
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            list = list.filter(d =>
+                (d.customer_name || '').toLowerCase().includes(q) ||
+                (d.customer_phone || '').includes(searchQuery)
+            );
+        }
+        return list;
+    }, [debts, searchQuery]);
+
+    const handleSelectDebt = async (debt: any) => {
+        setSelectedDebt(debt);
+        setSelectedDebtItems([]);
+        setPartialAmount('');
+        setShowPartialInput(false);
+        setDebtDetailsModal(true);
+        if (debt.sale_id) {
+            try {
+                const items = await getSaleItems(debt.sale_id);
+                setSelectedDebtItems(items);
+            } catch (e) {
+                console.error('Failed to load debt items', e);
+            }
+        }
+    };
+
+    const handleDebtPaidInFull = async (debt: any) => {
+        Alert.alert('Mark as Paid', `Has ${debt.customer_name} paid the remaining balance of ${currencySymbol}${formatAmount(debt.amount_owed).replace(currencySymbol, '')} in full?`, [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Yes, Paid', style: 'default', onPress: async () => {
-                await markDebtPaid(debtId);
-                await loadData();
+                try {
+                    await markDebtPaid(debt.id);
+                    await createPaymentLog(
+                        uuidv4(),
+                        debt.amount_owed,
+                        debt.customer_name,
+                        debt.customer_phone || null,
+                        'CASH',
+                        'Debt Paid in Full',
+                        `Debt ID: ${debt.id}`,
+                        userId || ''
+                    );
+                    setDebtDetailsModal(false);
+                    await loadData();
+                } catch (e) {
+                    Alert.alert('Error', 'Failed to mark debt as paid.');
+                }
             }}
         ]);
+    };
+
+    const handleDebtPaidPartially = async () => {
+        if (!partialAmount) {
+            Alert.alert('Required', 'Please enter the partial payment amount.');
+            return;
+        }
+        const parsedAmount = parseFloat(partialAmount.replace(/,/g, ''));
+        if (isNaN(parsedAmount) || parsedAmount <= 0) {
+            Alert.alert('Invalid', 'Please enter a valid amount.');
+            return;
+        }
+        if (parsedAmount > selectedDebt.amount_owed) {
+            Alert.alert('Invalid', `Amount cannot exceed the total balance owed (${currencySymbol}${formatAmount(selectedDebt.amount_owed).replace(currencySymbol, '')}).`);
+            return;
+        }
+        setPartialLoading(true);
+        try {
+            const remaining = selectedDebt.amount_owed - parsedAmount;
+            await recordDebtPayment(selectedDebt.id, parsedAmount, remaining);
+            await createPaymentLog(
+                uuidv4(),
+                parsedAmount,
+                selectedDebt.customer_name,
+                selectedDebt.customer_phone || null,
+                'CASH',
+                'Partial Debt Payment',
+                `Remaining balance: ${currencySymbol}${formatAmount(remaining).replace(currencySymbol, '')} (Debt ID: ${selectedDebt.id})`,
+                userId || ''
+            );
+            setDebtDetailsModal(false);
+            setPartialAmount('');
+            setShowPartialInput(false);
+            await loadData();
+            Alert.alert('Success', 'Partial payment recorded successfully!');
+        } catch (e) {
+            Alert.alert('Error', 'Failed to record partial payment.');
+        } finally {
+            setPartialLoading(false);
+        }
+    };
+
+    const handleSendReminder = async (debt: any) => {
+        const dateStr = formatDate(debt.created_at);
+        const message = `Friendly reminder from ${businessName || 'KashAm Store'}:\n\nHello ${debt.customer_name}, you have an outstanding balance of ${currencySymbol}${formatAmount(debt.amount_owed).replace(currencySymbol, '')} from your purchase on ${dateStr}.\n\nPlease kindly make payments. Thank you!`;
+        try {
+            await Share.share({ message });
+        } catch (error) {
+            console.error('Error sharing reminder', error);
+            Alert.alert('Error', 'Could not open share sheet.');
+        }
     };
 
     const handleLogPayment = async () => {
@@ -93,23 +251,50 @@ export default function TransactionScreen() {
             Alert.alert('Required', 'Please enter an amount.');
             return;
         }
+        const parsedAmount = parseFloat(logAmount.replace(/,/g, ''));
+        if (isNaN(parsedAmount) || parsedAmount <= 0) {
+            Alert.alert('Invalid', 'Please enter a valid amount.');
+            return;
+        }
         setLogLoading(true);
         try {
+            if (deductStock && selectedProduct) {
+                const qty = parseInt(productQuantity, 10);
+                if (isNaN(qty) || qty <= 0) {
+                    Alert.alert('Invalid', 'Please enter a valid quantity to deduct.');
+                    setLogLoading(false);
+                    return;
+                }
+                const newStock = selectedProduct.stock - qty;
+                await updateProductQuantity(selectedProduct.id, newStock);
+            }
+
+            let finalNotes = logNotes;
+            if (deductStock && selectedProduct) {
+                const qty = parseInt(productQuantity, 10);
+                const deductionInfo = `[Stock Deducted: ${selectedProduct.name} x${qty}]`;
+                finalNotes = logNotes ? `${logNotes}\n${deductionInfo}` : deductionInfo;
+            }
+
             await createPaymentLog(
                 uuidv4(),
-                parseFloat(logAmount),
+                parsedAmount,
                 logSenderName || null,
                 logSenderPhone || null,
                 logMethod,
-                'Manual Payment Log',
-                logNotes || null,
+                deductStock && selectedProduct ? `Sale: ${selectedProduct.name}` : 'Manual Payment Log',
+                finalNotes || null,
                 userId || ''
             );
+            
             setLogPaymentModal(false);
             setLogAmount('');
             setLogSenderName('');
             setLogSenderPhone('');
             setLogNotes('');
+            setDeductStock(false);
+            setSelectedProduct(null);
+            setProductQuantity('1');
             await loadData();
         } catch (e) {
             Alert.alert('Error', 'Failed to log payment.');
@@ -120,38 +305,14 @@ export default function TransactionScreen() {
 
     const toggleRow = async (saleId: string) => {
         if (expandedRows[saleId]) {
-            // Collapse
             const next = { ...expandedRows };
             delete next[saleId];
             setExpandedRows(next);
         } else {
-            // Expand
             const items = await getSaleItems(saleId);
             setExpandedRows({ ...expandedRows, [saleId]: items });
         }
     };
-
-    const filteredTransactions = useMemo(() => {
-        let list = transactions;
-        if (searchQuery) {
-            list = list.filter(t => 
-                (t.customer_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                (t.customer_phone || '').includes(searchQuery)
-            );
-        }
-        return list;
-    }, [transactions, searchQuery]);
-
-    const filteredDebts = useMemo(() => {
-        let list = debts;
-        if (searchQuery) {
-            list = list.filter(d => 
-                (d.customer_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                (d.customer_phone || '').includes(searchQuery)
-            );
-        }
-        return list;
-    }, [debts, searchQuery]);
 
     const getDaysOverdue = (timestamp: number) => {
         const diff = Date.now() - timestamp;
@@ -165,7 +326,6 @@ export default function TransactionScreen() {
         setSharingTx(transaction);
         setSharingItems(items);
         
-        // Wait a tick for ReceiptView to render
         setTimeout(async () => {
             try {
                 if (receiptRef.current) {
@@ -183,7 +343,6 @@ export default function TransactionScreen() {
                 }
             } catch (error) {
                 console.error("View shot error:", error);
-                // Fallback to text
                 const lines = items.map(i => `${i.product_name} x${i.quantity} — ${currencySymbol}${formatCurrency(i.price * i.quantity, currencySymbol).replace(currencySymbol, '')}`);
                 const message = `Receipt from ${businessName || 'KashAm'}\n\n${lines.join('\n')}\n\nTotal: ${currencySymbol}${formatCurrency(transaction.total, currencySymbol).replace(currencySymbol, '')}`;
                 Share.share({ message });
@@ -244,12 +403,13 @@ export default function TransactionScreen() {
                     </TouchableOpacity>
                 </View>
 
-                <View className="px-6 mb-6">
-                    <View className="flex-row items-center bg-white border border-border rounded-xl px-4 py-1 h-12 shadow-sm">
+                {/* SEARCH AND DATE FILTERS */}
+                <View className="px-6 mb-6 flex-row gap-3">
+                    <View className="flex-1 flex-row items-center bg-white border border-border rounded-xl px-4 py-1 h-12 shadow-sm">
                         <Search size={18} color="#64748B" />
                         <TextInput placeholderTextColor="#94A3B8" 
                             className="flex-1 ml-3 text-sm font-bold text-textPrimary" 
-                            placeholder="Search customer name or phone..." 
+                            placeholder="Search customer..." 
                             value={searchQuery}
                             onChangeText={setSearchQuery}
                         />
@@ -259,6 +419,19 @@ export default function TransactionScreen() {
                             </TouchableOpacity>
                         )}
                     </View>
+                    <TouchableOpacity 
+                        onPress={() => setShowDateDropdown(true)}
+                        className="bg-white border border-border rounded-xl px-4 h-12 justify-center items-center flex-row gap-1 shadow-sm"
+                    >
+                        <Text className="text-textPrimary font-bold text-xs">
+                            {dateFilter === 'all' && 'All Time'}
+                            {dateFilter === 'today' && 'Today'}
+                            {dateFilter === 'yesterday' && 'Yesterday'}
+                            {dateFilter === '7days' && '7 Days'}
+                            {dateFilter === '30days' && '30 Days'}
+                        </Text>
+                        <ChevronDown size={14} color="#64748B" />
+                    </TouchableOpacity>
                 </View>
 
                 {/* LIST CONTENT */}
@@ -308,37 +481,48 @@ export default function TransactionScreen() {
                                     
                                     {isExpanded && (
                                         <View className="bg-lightBackground px-6 py-4 border-t border-border/50">
-                                            <Text className="text-textSecondary text-[10px] font-black uppercase tracking-widest mb-3">Items Summary</Text>
+                                            <Text className="text-textSecondary text-[10px] font-black uppercase tracking-widest mb-3">Items Breakdown</Text>
                                             {expandedRows[t.id]?.map((item, idx) => (
-                                                <View key={idx} className="flex-row justify-between py-1.5">
-                                                    <Text className="font-bold text-xs text-textPrimary flex-1">{item.product_name}</Text>
-                                                    <Text className="text-textSecondary font-bold text-xs mx-4">x{item.quantity}</Text>
-                                                    <Text className="font-black text-xs text-textPrimary">{formatAmount(item.price * item.quantity)}</Text>
+                                                <View key={idx} className="flex-row justify-between py-1.5 border-b border-border/10">
+                                                    <Text className="font-bold text-xs text-textPrimary flex-1" numberOfLines={1}>{item.product_name}</Text>
+                                                    <Text className="text-textSecondary font-bold text-xs mx-3">{item.quantity} × {formatAmount(item.price / item.quantity)}</Text>
+                                                    <Text className="font-black text-xs text-primary w-20 text-right">{formatAmount(item.price)}</Text>
                                                 </View>
                                             ))}
-                                                <View className="mt-4 flex-row items-center justify-between">
-                                                    {t.customer_phone ? (
-                                                        <View className="flex-row items-center">
-                                                            <Phone size={14} color="#64748B" />
-                                                            <Text className="text-textSecondary text-xs font-bold ml-2">{t.customer_phone}</Text>
-                                                        </View>
-                                                    ) : <View />}
-                                                    <TouchableOpacity 
-                                                        onPress={() => handleShareReceipt(t)}
-                                                        disabled={isCapturing}
-                                                        className="flex-row items-center bg-primary/10 px-3 py-1.5 rounded-lg"
-                                                    >
-                                                        {isCapturing && sharingTx?.id === t.id ? (
-                                                            <ActivityIndicator size="small" color="#16A34A" />
-                                                        ) : (
-                                                            <>
-                                                                <Share2 size={14} color="#16A34A" />
-                                                                <Text className="text-primary font-bold text-xs ml-1.5">Receipt</Text>
-                                                            </>
-                                                        )}
-                                                    </TouchableOpacity>
-                                                </View>
+                                            {/* Subtotal line */}
+                                            <View className="mt-3 pt-3 border-t border-border flex-row justify-between items-center">
+                                                <Text className="text-textSecondary font-bold text-xs">Cart Total</Text>
+                                                <Text className="font-black text-sm text-textPrimary">{formatAmount(t.total)}</Text>
                                             </View>
+                                            {t.discount_amount > 0 && (
+                                                <View className="flex-row justify-between items-center mt-1">
+                                                    <Text className="text-textSecondary font-bold text-xs">Price Override</Text>
+                                                    <Text className="font-black text-xs text-danger">−{formatAmount(t.discount_amount)}</Text>
+                                                </View>
+                                            )}
+                                            <View className="mt-4 flex-row items-center justify-between">
+                                                {t.customer_phone ? (
+                                                    <View className="flex-row items-center">
+                                                        <Phone size={14} color="#64748B" />
+                                                        <Text className="text-textSecondary text-xs font-bold ml-2">{t.customer_phone}</Text>
+                                                    </View>
+                                                ) : <View />}
+                                                <TouchableOpacity 
+                                                    onPress={() => handleShareReceipt(t)}
+                                                    disabled={isCapturing}
+                                                    className="flex-row items-center bg-primary/10 px-3 py-1.5 rounded-lg"
+                                                >
+                                                    {isCapturing && sharingTx?.id === t.id ? (
+                                                        <ActivityIndicator size="small" color="#16A34A" />
+                                                    ) : (
+                                                        <>
+                                                            <Share2 size={14} color="#16A34A" />
+                                                            <Text className="text-primary font-bold text-xs ml-1.5">Receipt</Text>
+                                                        </>
+                                                    )}
+                                                </TouchableOpacity>
+                                            </View>
+                                        </View>
                                     )}
                                 </View>
                             );
@@ -355,26 +539,28 @@ export default function TransactionScreen() {
                         {filteredDebts.map(d => {
                             const daysOverdue = getDaysOverdue(d.created_at);
                             return (
-                                <View key={d.id} className="bg-dangerLight/20 border border-danger/20 rounded-2xl p-4 mb-4">
-                                    <View className="flex-row justify-between items-start mb-4">
-                                        <View className="flex-1">
-                                            <Text className="font-bold text-base text-[#991B1B]">{d.customer_name}</Text>
-                                            {d.customer_phone && <Text className="text-[#991B1B]/70 text-xs font-bold mt-1">{d.customer_phone}</Text>}
-                                        </View>
-                                        <View className="items-end">
-                                            <Text className="font-black text-lg text-danger">{formatAmount(d.amount_owed)}</Text>
-                                            <Text className="text-[#991B1B]/60 text-[10px] font-bold uppercase mt-1">
-                                                {daysOverdue === 0 ? 'Today' : `${daysOverdue} days overdue`}
-                                            </Text>
-                                        </View>
+                                <TouchableOpacity 
+                                    key={d.id} 
+                                    onPress={() => handleSelectDebt(d)}
+                                    className="bg-white border border-border rounded-2xl p-4 mb-4 shadow-sm flex-row justify-between items-center"
+                                >
+                                    <View className="flex-1">
+                                        <Text className="font-bold text-base text-textPrimary">{d.customer_name}</Text>
+                                        <Text className="text-textSecondary text-xs font-bold mt-1">
+                                            {d.customer_phone ? `${d.customer_phone} · ` : ''}
+                                            {daysOverdue === 0 ? 'Today' : `${daysOverdue} days overdue`}
+                                        </Text>
                                     </View>
-                                    <TouchableOpacity 
-                                        onPress={() => handleMarkPaid(d.id)}
-                                        className="bg-danger py-3 rounded-xl items-center"
-                                    >
-                                        <Text className="text-white font-black text-sm">Mark as Paid</Text>
-                                    </TouchableOpacity>
-                                </View>
+                                    <View className="items-end flex-row items-center gap-3">
+                                        <View className="items-end">
+                                            <Text className="font-black text-base text-danger">{formatAmount(d.amount_owed)}</Text>
+                                            <View className="bg-dangerLight px-2 py-0.5 rounded-full mt-1">
+                                                <Text className="text-danger text-[9px] font-black uppercase">PAY LATER</Text>
+                                            </View>
+                                        </View>
+                                        <ChevronDown size={18} color="#CBD5E1" style={{ transform: [{ rotate: '-90deg' }] }} />
+                                    </View>
+                                </TouchableOpacity>
                             );
                         })}
                     </View>
@@ -388,6 +574,158 @@ export default function TransactionScreen() {
             >
                 <Plus size={28} color="white" />
             </TouchableOpacity>
+
+            {/* DATE FILTER SELECTION MODAL */}
+            <Modal visible={showDateDropdown} transparent animationType="slide">
+                <View className="flex-1 bg-black/40 justify-end">
+                    <View className="bg-white rounded-t-[40px] p-6 pb-12">
+                        <View className="w-12 h-1.5 bg-border rounded-full self-center mb-6" />
+                        <View className="flex-row justify-between items-center mb-6">
+                            <Text className="text-2xl font-black">Select Date Range</Text>
+                            <TouchableOpacity onPress={() => setShowDateDropdown(false)} className="bg-lightBackground p-2 rounded-xl">
+                                <X size={24} color="black" />
+                            </TouchableOpacity>
+                        </View>
+                        <View className="gap-2">
+                            {[
+                                { key: 'all', label: 'All Time' },
+                                { key: 'today', label: 'Today' },
+                                { key: 'yesterday', label: 'Yesterday' },
+                                { key: '7days', label: 'Last 7 Days' },
+                                { key: '30days', label: 'Last 30 Days' }
+                            ].map(item => (
+                                <TouchableOpacity 
+                                    key={item.key} 
+                                    onPress={() => { setDateFilter(item.key as any); setShowDateDropdown(false); }}
+                                    className={`p-4 rounded-xl border flex-row justify-between items-center ${dateFilter === item.key ? 'bg-primaryLight border-primary' : 'bg-lightBackground border-border'}`}
+                                >
+                                    <Text className={`font-black text-sm ${dateFilter === item.key ? 'text-primaryDark' : 'text-textPrimary'}`}>{item.label}</Text>
+                                    {dateFilter === item.key && <CheckCircle size={18} color="#16A34A" />}
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* DEBT DETAILS MODAL SHEET */}
+            <Modal visible={debtDetailsModal} transparent animationType="slide">
+                <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 bg-black/40 justify-end">
+                    <View className="bg-white rounded-t-[40px] pt-4" style={{ paddingBottom: Math.max(insets.bottom, 24), maxHeight: '85%' }}>
+                        <View className="w-12 h-1.5 bg-border rounded-full self-center mb-6" />
+                        
+                        <View className="flex-row justify-between items-center px-6 mb-6">
+                            <Text className="text-2xl font-black text-textPrimary">Debt Details</Text>
+                            <TouchableOpacity onPress={() => { setDebtDetailsModal(false); setShowPartialInput(false); }} className="bg-lightBackground p-2 rounded-full">
+                                <X size={24} color="#0F172A" />
+                            </TouchableOpacity>
+                        </View>
+                        
+                        {selectedDebt && (
+                            <ScrollView showsVerticalScrollIndicator={false} className="px-6">
+                                {/* Customer Summary Card */}
+                                <View className="bg-dangerLight/20 border border-danger/20 p-5 rounded-3xl mb-6">
+                                    <Text className="font-black text-xl text-dangerDark">{selectedDebt.customer_name}</Text>
+                                    {selectedDebt.customer_phone && (
+                                        <Text className="text-textSecondary text-xs font-bold mt-1">{selectedDebt.customer_phone}</Text>
+                                    )}
+                                    <View className="flex-row justify-between items-end mt-4 pt-4 border-t border-danger/10">
+                                        <View>
+                                            <Text className="text-[10px] text-danger font-black uppercase tracking-wider">Amount Owed</Text>
+                                            <Text className="text-2xl font-black text-danger mt-1">{formatAmount(selectedDebt.amount_owed)}</Text>
+                                        </View>
+                                        <View className="bg-danger/10 px-3 py-1 rounded-full">
+                                            <Text className="text-danger font-bold text-xs uppercase">
+                                                {getDaysOverdue(selectedDebt.created_at) === 0 ? 'Added Today' : `${getDaysOverdue(selectedDebt.created_at)} Days Overdue`}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                </View>
+
+                                {/* Items Breakdown */}
+                                {selectedDebtItems.length > 0 && (
+                                    <View className="mb-6">
+                                        <Text className="text-textSecondary text-[10px] font-black uppercase tracking-widest mb-3">Items Purchased</Text>
+                                        <View className="bg-lightBackground p-4 rounded-2xl border border-border/50">
+                                            {selectedDebtItems.map((item, idx) => (
+                                                <View key={idx} className="flex-row justify-between py-2 border-b border-border/20 last:border-0">
+                                                    <Text className="font-bold text-xs text-textPrimary flex-1">{item.product_name}</Text>
+                                                    <Text className="text-textSecondary font-bold text-xs mx-4">x{item.quantity}</Text>
+                                                    <Text className="font-black text-xs text-textPrimary">{formatAmount(item.price * item.quantity)}</Text>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    </View>
+                                )}
+
+                                {/* Action Buttons */}
+                                <View className="gap-3 mb-6">
+                                    {!showPartialInput ? (
+                                        <>
+                                            <View className="flex-row gap-3">
+                                                <TouchableOpacity 
+                                                    onPress={() => handleDebtPaidInFull(selectedDebt)}
+                                                    className="flex-1 bg-primary py-4 rounded-2xl items-center justify-center flex-row gap-2"
+                                                >
+                                                    <CheckCircle size={18} color="white" />
+                                                    <Text className="text-white font-black text-sm">Paid In Full</Text>
+                                                </TouchableOpacity>
+                                                <TouchableOpacity 
+                                                    onPress={() => setShowPartialInput(true)}
+                                                    className="flex-1 bg-accent py-4 rounded-2xl items-center justify-center flex-row gap-2"
+                                                >
+                                                    <Banknote size={18} color="white" />
+                                                    <Text className="text-white font-black text-sm">Paid Partially</Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                            <TouchableOpacity 
+                                                onPress={() => handleSendReminder(selectedDebt)}
+                                                className="bg-white border border-border py-4 rounded-2xl items-center justify-center flex-row gap-2 shadow-sm"
+                                            >
+                                                <Share2 size={18} color="#16A34A" />
+                                                <Text className="text-primary font-black text-sm">Send Payment Reminder</Text>
+                                            </TouchableOpacity>
+                                        </>
+                                    ) : (
+                                        <View className="bg-lightBackground p-4 rounded-2xl border border-border">
+                                            <Text className="text-textPrimary font-black text-sm mb-3">Record Partial Payment</Text>
+                                            <TextInput 
+                                                placeholderTextColor="#94A3B8"
+                                                className="bg-white border border-border p-3 rounded-xl font-black text-lg mb-3 text-textPrimary"
+                                                placeholder="Enter Amount Paid"
+                                                keyboardType="numeric"
+                                                value={partialAmount}
+                                                onChangeText={(t) => {
+                                                    setPartialAmount(t);
+                                                }}
+                                            />
+                                            <View className="flex-row gap-3">
+                                                <TouchableOpacity 
+                                                    onPress={() => setShowPartialInput(false)}
+                                                    className="flex-1 bg-white border border-border py-3 rounded-xl items-center"
+                                                >
+                                                    <Text className="text-textSecondary font-bold text-xs">Cancel</Text>
+                                                </TouchableOpacity>
+                                                <TouchableOpacity 
+                                                    onPress={handleDebtPaidPartially}
+                                                    disabled={partialLoading}
+                                                    className="flex-1 bg-primary py-3 rounded-xl items-center justify-center"
+                                                >
+                                                    {partialLoading ? (
+                                                        <ActivityIndicator size="small" color="white" />
+                                                    ) : (
+                                                        <Text className="text-white font-black text-xs">Save Payment</Text>
+                                                    )}
+                                                </TouchableOpacity>
+                                            </View>
+                                        </View>
+                                    )}
+                                </View>
+                            </ScrollView>
+                        )}
+                    </View>
+                </KeyboardAvoidingView>
+            </Modal>
 
             {/* LOG PAYMENT MODAL */}
             <Modal visible={logPaymentModal} transparent animationType="slide">
@@ -444,6 +782,51 @@ export default function TransactionScreen() {
                                 ))}
                             </View>
 
+                            {/* Stock Deduction Toggle */}
+                            <TouchableOpacity 
+                                onPress={() => setDeductStock(!deductStock)}
+                                className="flex-row items-center gap-3 py-3 border-b border-border/30 mb-4"
+                            >
+                                <View className={`w-5 h-5 rounded-md border items-center justify-center ${deductStock ? 'bg-primary border-primary' : 'border-border'}`}>
+                                    {deductStock && <CheckCircle size={14} color="white" />}
+                                </View>
+                                <Text className="font-bold text-xs text-textPrimary">Bought a product? (Deduct Stock)</Text>
+                            </TouchableOpacity>
+
+                            {deductStock && (
+                                <>
+                                    {!selectedProduct ? (
+                                        <TouchableOpacity 
+                                            onPress={() => setShowProductSelector(true)}
+                                            className="bg-lightBackground border border-border p-4 rounded-xl items-center justify-center mb-4"
+                                        >
+                                            <Text className="font-black text-xs text-primary">SELECT PRODUCT TO DEDUCT</Text>
+                                        </TouchableOpacity>
+                                    ) : (
+                                        <View className="bg-lightBackground border border-border p-4 rounded-xl mb-4 relative">
+                                            <TouchableOpacity 
+                                                onPress={() => setSelectedProduct(null)}
+                                                className="absolute top-2 right-2 bg-black/20 rounded-full p-1 z-10"
+                                            >
+                                                <X size={14} color="#0F172A" />
+                                            </TouchableOpacity>
+                                            <Text className="font-black text-sm text-textPrimary">{selectedProduct.name}</Text>
+                                            <Text className="text-textSecondary text-[10px] font-bold mt-1">Stock remaining: {selectedProduct.stock}</Text>
+                                            
+                                            <View className="flex-row items-center gap-3 mt-3">
+                                                <Text className="font-bold text-xs text-textSecondary">Quantity sold:</Text>
+                                                <TextInput 
+                                                    keyboardType="numeric"
+                                                    className="bg-white border border-border px-3 py-1.5 rounded-lg font-bold text-textPrimary text-center w-16"
+                                                    value={productQuantity}
+                                                    onChangeText={setProductQuantity}
+                                                />
+                                            </View>
+                                        </View>
+                                    )}
+                                </>
+                            )}
+
                             <TextInput placeholderTextColor="#94A3B8" 
                                 className="bg-lightBackground border border-border p-4 rounded-xl font-bold mb-8 text-textPrimary min-h-[100px]" 
                                 placeholder="Notes (Optional)" 
@@ -464,6 +847,48 @@ export default function TransactionScreen() {
                     </View>
                 </KeyboardAvoidingView>
             </Modal>
+
+            {/* PRODUCT SELECTOR MODAL */}
+            <Modal visible={showProductSelector} transparent animationType="slide">
+                <View className="flex-1 bg-black/40 justify-end">
+                    <View className="bg-white rounded-t-[40px] p-6" style={{ height: '70%', paddingBottom: Math.max(insets.bottom, 24) }}>
+                        <View className="w-12 h-1.5 bg-border rounded-full self-center mb-6" />
+                        <View className="flex-row justify-between items-center mb-6">
+                            <Text className="text-2xl font-black text-textPrimary">Select Product</Text>
+                            <TouchableOpacity onPress={() => setShowProductSelector(false)} className="bg-lightBackground p-2 rounded-full">
+                                <X size={24} color="#0F172A" />
+                            </TouchableOpacity>
+                        </View>
+                        
+                        <FlatList 
+                            data={dbProducts}
+                            keyExtractor={p => p.id}
+                            showsVerticalScrollIndicator={false}
+                            renderItem={({ item }) => (
+                                <TouchableOpacity 
+                                    onPress={() => {
+                                        setSelectedProduct(item);
+                                        setShowProductSelector(false);
+                                    }}
+                                    className="p-4 border-b border-border/50 flex-row justify-between items-center"
+                                >
+                                    <View>
+                                        <Text className="font-bold text-sm text-textPrimary">{item.name}</Text>
+                                        <Text className="text-[10px] text-textSecondary mt-1">Stock: {item.stock} · Price: {currencySymbol}{formatAmount(item.price).replace(currencySymbol, '')}</Text>
+                                    </View>
+                                    <ChevronDown size={16} color="#CBD5E1" style={{ transform: [{ rotate: '-90deg' }] }} />
+                                </TouchableOpacity>
+                            )}
+                            ListEmptyComponent={
+                                <View className="py-12 items-center">
+                                    <Text className="text-textSecondary font-bold">No products found in stock</Text>
+                                </View>
+                            }
+                        />
+                    </View>
+                </View>
+            </Modal>
+
             <ReceiptView 
                 ref={receiptRef} 
                 businessName={businessName || 'KashAm Store'} 

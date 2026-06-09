@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ActivityIndicator, Alert, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ActivityIndicator, Alert, ScrollView, Modal } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { API_URL } from '../config';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronRight, ArrowLeft, Lock, Store, Phone, Eye, EyeOff, ShieldCheck, CheckCircle, Fingerprint } from 'lucide-react-native';
-import * as LocalAuthentication from 'expo-local-authentication';
-import * as SecureStore from 'expo-secure-store';
+import { ChevronRight, ArrowLeft, Lock, Store, Phone, Eye, EyeOff, ShieldCheck, CheckCircle, Wallet, Package, Sparkles, X } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import CountryPicker, { CountryCode } from 'react-native-country-picker-modal';
 import { saveCountryCode } from '../hooks/useCurrency';
@@ -39,6 +37,24 @@ const getPhonePlaceholder = (countryCode: string): string => {
   return placeholders[countryCode] ?? 'e.g. Your phone number';
 };
 
+const WALKTHROUGH_SLIDES = [
+    {
+        title: 'Stop losing your money to memory',
+        description: 'Every day, little sales slip away because you forgot to write them down. KashAm tracks every single Cedi and Naira instantly, so you go home knowing your exact profit.',
+        icon: Wallet
+    },
+    {
+        title: 'Never tell a customer "It\'s finished"',
+        description: 'Turning a customer away is like throwing away money. KashAm alerts you before your fastest-moving items run empty, keeping your shelves full and your shop busy.',
+        icon: Package
+    },
+    {
+        title: 'Get paid back without the awkward talks',
+        description: 'Chasing customer debts feels stressful and awkward. KashAm keeps accurate, indisputable records of who owes you and lets you send polite, friendly reminders with one tap.',
+        icon: ShieldCheck
+    }
+];
+
 export default function LoginScreen() {
     const [step, setStep] = useState<Step>('welcome');
     
@@ -67,15 +83,39 @@ export default function LoginScreen() {
     const [phoneError, setPhoneError] = useState('');
     const [loginError, setLoginError] = useState('');
 
-    // Biometric State
-    const [biometricAvailable, setBiometricAvailable] = useState(false);
-    const [biometricType, setBiometricType] = useState('fingerprint');
+    // Inline Login Validation States
+    const [loginPhoneError, setLoginPhoneError] = useState('');
+    const [loginPasswordError, setLoginPasswordError] = useState('');
+
+    // Onboarding / Splash States
+    const [showSplash, setShowSplash] = useState(true);
+    const [showWalkthrough, setShowWalkthrough] = useState(false);
+    const [walkthroughPage, setWalkthroughPage] = useState(0);
+
+    // Forgot Password States
+    const [forgotPasswordVisible, setForgotPasswordVisible] = useState(false);
+    const [forgotStep, setForgotStep] = useState<'phone' | 'otp' | 'password'>('phone');
+    const [forgotPhone, setForgotPhone] = useState('');
+    const [forgotPhoneError, setForgotPhoneError] = useState('');
+    const [forgotPinId, setForgotPinId] = useState('');
+    const [forgotOtp, setForgotOtp] = useState(['', '', '', '', '', '']);
+    const [forgotOtpError, setForgotOtpError] = useState('');
+    const [forgotNewPassword, setForgotNewPassword] = useState('');
+    const [forgotPasswordError, setForgotPasswordError] = useState('');
+    const [forgotCountdown, setForgotCountdown] = useState(60);
+    const forgotOtpRefs = useRef<Array<TextInput | null>>([]);
 
     const { login } = useAuthStore();
     const insets = useSafeAreaInsets();
 
     const getFullPhone = () => {
         const digitsOnly = phone.replace(/\D/g, '');
+        const cleaned = digitsOnly.replace(/^0+/, '');
+        return `+${callingCode}${cleaned}`;
+    };
+
+    const getForgotFullPhone = () => {
+        const digitsOnly = forgotPhone.replace(/\D/g, '');
         const cleaned = digitsOnly.replace(/^0+/, '');
         return `+${callingCode}${cleaned}`;
     };
@@ -87,6 +127,13 @@ export default function LoginScreen() {
     const hasSpecial = /[^A-Za-z0-9]/.test(password);
     const isPasswordValid = hasLength && hasUpper && hasNumber && hasSpecial;
 
+    // Forgot password validation
+    const forgotHasLength = forgotNewPassword.length >= 8;
+    const forgotHasUpper = /[A-Z]/.test(forgotNewPassword);
+    const forgotHasNumber = /[0-9]/.test(forgotNewPassword);
+    const forgotHasSpecial = /[^A-Za-z0-9]/.test(forgotNewPassword);
+    const isForgotNewPasswordValid = forgotHasLength && forgotHasUpper && forgotHasNumber && forgotHasSpecial;
+
     useEffect(() => {
         let timer: NodeJS.Timeout;
         if (step === 'signup_otp' && countdown > 0) {
@@ -96,18 +143,25 @@ export default function LoginScreen() {
     }, [step, countdown]);
 
     useEffect(() => {
-        const checkBiometric = async () => {
-            const enabled = await SecureStore.getItemAsync('biometricEnabled');
-            const compatible = await LocalAuthentication.hasHardwareAsync();
-            const enrolled = await LocalAuthentication.isEnrolledAsync();
-            setBiometricAvailable(enabled === 'true' && compatible && enrolled);
-            
-            const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
-            if (types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)) {
-                setBiometricType('face ID');
-            } else {
-                setBiometricType('fingerprint');
-            }
+        let timer: NodeJS.Timeout;
+        if (forgotPasswordVisible && forgotStep === 'otp' && forgotCountdown > 0) {
+            timer = setTimeout(() => setForgotCountdown(c => c - 1), 1000);
+        }
+        return () => clearTimeout(timer);
+    }, [forgotPasswordVisible, forgotStep, forgotCountdown]);
+
+    useEffect(() => {
+        const checkFirstLaunch = async () => {
+            const completed = await AsyncStorage.getItem('hasCompletedWalkthrough');
+            // Show splash for 1.5 seconds then transition
+            setTimeout(() => {
+                setShowSplash(false);
+                if (completed === 'true') {
+                    setStep('welcome');
+                } else {
+                    setShowWalkthrough(true);
+                }
+            }, 1500);
         };
         const loadSavedCountry = async () => {
             const saved = await AsyncStorage.getItem('countryCode');
@@ -123,16 +177,25 @@ export default function LoginScreen() {
                 setCallingCode(codes[saved] ?? '234');
             }
         };
-        checkBiometric();
+        checkFirstLaunch();
         loadSavedCountry();
     }, []);
 
     const handleLogin = async () => {
+        setLoginPhoneError('');
+        setLoginPasswordError('');
         setLoginError('');
-        if (!phone || !password) {
-            setLoginError('Please enter both phone and password');
-            return;
+
+        let hasError = false;
+        if (!phone.trim()) {
+            setLoginPhoneError('Phone number is required');
+            hasError = true;
         }
+        if (!password) {
+            setLoginPasswordError('Password is required');
+            hasError = true;
+        }
+        if (hasError) return;
 
         setLoading(true);
         try {
@@ -158,29 +221,158 @@ export default function LoginScreen() {
         }
     };
 
-    const handleBiometricLogin = async () => {
-        const result = await LocalAuthentication.authenticateAsync({
-            promptMessage: 'Login to KashAm',
-            fallbackLabel: 'Use password instead',
-            cancelLabel: 'Cancel',
-            disableDeviceFallback: false,
-        });
+    const handleForgotSendOtp = async () => {
+        setForgotPhoneError('');
+        if (!forgotPhone) {
+            setForgotPhoneError('Please enter your phone number');
+            return;
+        }
 
-        if (result.success) {
-            const userId = await SecureStore.getItemAsync('biometricUserId');
-            if (!userId) {
-                Alert.alert('Error', 'Could not find account. Please login with your password.');
-                return;
-            }
-            const token = await SecureStore.getItemAsync('jwt_token');
-            const refreshToken = await SecureStore.getItemAsync('jwt_refresh_token');
-            if (token && refreshToken) {
-                await login(token, refreshToken, userId);
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_URL}/auth/forgot-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: getForgotFullPhone() })
+            });
+            const data = await res.json();
+            
+            if (res.ok && data.success) {
+                setForgotPinId(data.pinId);
+                setForgotCountdown(60);
+                setForgotOtp(['', '', '', '', '', '']);
+                setForgotStep('otp');
             } else {
-                Alert.alert('Error', 'Session expired. Please login with your password.');
+                setForgotPhoneError(data.message || 'Could not send verification code.');
             }
-        } else if (result.error !== 'user_cancel') {
-            Alert.alert('Error', 'Biometric authentication failed. Please use your password.');
+        } catch (e) {
+            setForgotPhoneError('Could not reach the server. Please check your connection.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleForgotVerifyOtp = async () => {
+        setForgotOtpError('');
+        const otpString = forgotOtp.join('');
+        if (otpString.length !== 6) {
+            setForgotOtpError('Please enter the 6-digit code');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_URL}/auth/verify-otp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin_id: forgotPinId, pin: otpString })
+            });
+            const data = await res.json();
+            
+            if (res.ok && data.success) {
+                setForgotStep('password');
+            } else {
+                setForgotOtpError(data.message || 'The code you entered is incorrect.');
+            }
+        } catch (e) {
+            setForgotOtpError('Could not reach the server.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleForgotResetPassword = async () => {
+        setForgotPasswordError('');
+        if (!isForgotNewPasswordValid) {
+            setForgotPasswordError('Password must meet all requirements');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_URL}/auth/reset-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    phone: getForgotFullPhone(),
+                    pin_id: forgotPinId,
+                    pin: forgotOtp.join(''),
+                    password: forgotNewPassword
+                })
+            });
+            const data = await res.json();
+            
+            if (res.ok && data.success) {
+                Alert.alert('Success', 'Your password has been successfully reset! You can now log in with your new password.', [
+                    { text: 'OK', onPress: () => {
+                        setForgotPasswordVisible(false);
+                        setStep('login');
+                        setPhone(forgotPhone);
+                        setPassword('');
+                    }}
+                ]);
+            } else {
+                setForgotPasswordError(data.message || 'Failed to reset password.');
+            }
+        } catch (e) {
+            setForgotPasswordError('Could not reach the server.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleForgotResendOtp = async () => {
+        setForgotOtp(['', '', '', '', '', '']);
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_URL}/auth/forgot-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: getForgotFullPhone() })
+            });
+            const data = await res.json();
+            
+            if (res.ok && data.success) {
+                setForgotPinId(data.pinId);
+                setForgotCountdown(60);
+                Alert.alert('Success', 'Verification code resent.');
+            } else {
+                Alert.alert('Error', data.message || 'Could not resend verification code.');
+            }
+        } catch (e) {
+            Alert.alert('Network Error', 'Could not reach the server.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleForgotOtpChange = (text: string, index: number) => {
+        const newOtp = [...forgotOtp];
+        if (text.length > 1) {
+            const pasted = text.replace(/[^0-9]/g, '').slice(0, 6);
+            for (let i = 0; i < pasted.length; i++) {
+                newOtp[i] = pasted[i];
+            }
+            setForgotOtp(newOtp);
+            if (pasted.length === 6) {
+                forgotOtpRefs.current[5]?.blur();
+            } else {
+                forgotOtpRefs.current[pasted.length]?.focus();
+            }
+            return;
+        }
+
+        newOtp[index] = text;
+        setForgotOtp(newOtp);
+        
+        if (text && index < 5) {
+            forgotOtpRefs.current[index + 1]?.focus();
+        }
+    };
+
+    const handleForgotOtpKeyPress = (e: any, index: number) => {
+        if (e.nativeEvent.key === 'Backspace' && !forgotOtp[index] && index > 0) {
+            forgotOtpRefs.current[index - 1]?.focus();
         }
     };
 
@@ -385,7 +577,7 @@ export default function LoginScreen() {
 
             <View className="mb-6">
                 <Text className="text-textSecondary text-xs font-black uppercase mb-2">Phone Number</Text>
-                <View className="flex-row items-center bg-white border border-border rounded-xl px-4 h-14 shadow-sm">
+                <View className={`flex-row items-center bg-white border rounded-xl px-4 h-14 shadow-sm ${loginPhoneError ? 'border-red-500' : 'border-border'}`}>
                     <CountryPicker
                         withFilter
                         withCallingCode
@@ -405,15 +597,17 @@ export default function LoginScreen() {
                         value={phone}
                         onChangeText={(t) => {
                             setPhone(t);
+                            if (loginPhoneError) setLoginPhoneError('');
                             if (loginError) setLoginError('');
                         }}
                     />
                 </View>
+                {loginPhoneError ? <Text className="text-red-500 font-bold text-xs mt-2 ml-1">{loginPhoneError}</Text> : null}
             </View>
 
             <View className="mb-8">
                 <Text className="text-textSecondary text-xs font-black uppercase mb-2">Password</Text>
-                <View className="flex-row items-center bg-white border border-border rounded-xl px-4 h-14 shadow-sm">
+                <View className={`flex-row items-center bg-white border rounded-xl px-4 h-14 shadow-sm ${(loginPasswordError || loginError) ? 'border-red-500' : 'border-border'}`}>
                     <Lock size={20} color="#64748B" />
                     <TextInput 
                         className="flex-1 font-bold text-base text-textPrimary ml-3" 
@@ -423,6 +617,7 @@ export default function LoginScreen() {
                         value={password}
                         onChangeText={(t) => {
                             setPassword(t);
+                            if (loginPasswordError) setLoginPasswordError('');
                             if (loginError) setLoginError('');
                         }}
                     />
@@ -430,11 +625,15 @@ export default function LoginScreen() {
                         {showPassword ? <EyeOff size={20} color="#64748B" /> : <Eye size={20} color="#64748B" />}
                     </TouchableOpacity>
                 </View>
+                {(loginPasswordError || loginError) ? (
+                    <Text className="text-red-500 font-bold text-xs mt-2 ml-1">{loginPasswordError || loginError}</Text>
+                ) : null}
+                <View className="flex-row justify-end mt-3">
+                    <TouchableOpacity onPress={() => { setForgotPasswordVisible(true); setForgotStep('phone'); setForgotPhone(phone); }}>
+                        <Text className="text-primary font-bold text-sm">Forgot Password?</Text>
+                    </TouchableOpacity>
+                </View>
             </View>
-
-            {loginError ? (
-                <Text className="text-red-500 font-bold text-sm mb-6 text-center">{loginError}</Text>
-            ) : null}
 
             <TouchableOpacity 
                 onPress={handleLogin}
@@ -448,22 +647,6 @@ export default function LoginScreen() {
                     </>
                 )}
             </TouchableOpacity>
-
-            {biometricAvailable && (
-                <View className="mt-8 items-center">
-                    <View className="flex-row items-center w-full mb-6">
-                        <View className="flex-1 h-px bg-border" />
-                        <Text className="mx-4 text-textSecondary font-bold text-xs uppercase">Or</Text>
-                        <View className="flex-1 h-px bg-border" />
-                    </View>
-                    <TouchableOpacity onPress={handleBiometricLogin} className="items-center">
-                        <View className="w-16 h-16 rounded-full bg-lightGreen items-center justify-center border border-primary/20 mb-2">
-                            <Fingerprint size={32} color="#16A34A" />
-                        </View>
-                        <Text className="text-textPrimary font-bold text-sm">Login with {biometricType}</Text>
-                    </TouchableOpacity>
-                </View>
-            )}
         </View>
     );
 
@@ -485,7 +668,7 @@ export default function LoginScreen() {
 
             <View className="mb-10">
                 <Text className="text-textSecondary text-xs font-black uppercase mb-2">Phone Number</Text>
-                <View className="flex-row items-center bg-white border border-border rounded-xl px-4 h-14 shadow-sm">
+                <View className={`flex-row items-center bg-white border rounded-xl px-4 h-14 shadow-sm ${phoneError ? 'border-red-500' : 'border-border'}`}>
                     <CountryPicker
                         withFilter
                         withCallingCode
@@ -510,11 +693,10 @@ export default function LoginScreen() {
                         autoFocus
                     />
                 </View>
+                {phoneError ? (
+                    <Text className="text-red-500 font-bold text-xs mt-2 ml-1">{phoneError}</Text>
+                ) : null}
             </View>
-
-            {phoneError ? (
-                <Text className="text-red-500 font-bold text-sm mb-6 text-center">{phoneError}</Text>
-            ) : null}
 
             <TouchableOpacity 
                 onPress={handleSendOtp}
@@ -735,6 +917,90 @@ export default function LoginScreen() {
         </View>
     );
 
+    const renderWalkthrough = () => {
+        const slide = WALKTHROUGH_SLIDES[walkthroughPage];
+        const IconComponent = slide.icon;
+        
+        return (
+            <View className="flex-1 bg-white px-6 justify-between pt-16 pb-12">
+                <View className="flex-1 justify-center items-center px-4">
+                    <View className="w-24 h-24 bg-lightGreen rounded-[30px] items-center justify-center mb-8 shadow-sm">
+                        <IconComponent size={44} color="#16A34A" />
+                    </View>
+                    <Text className="text-textPrimary font-black text-3xl text-center mb-4 tracking-tight leading-tight">
+                        {slide.title}
+                    </Text>
+                    <Text className="text-textSecondary font-bold text-center text-base leading-7">
+                        {slide.description}
+                    </Text>
+                </View>
+                
+                <View className="mt-8">
+                    <View className="flex-row justify-center gap-2 mb-8">
+                        {WALKTHROUGH_SLIDES.map((_, idx) => (
+                            <View 
+                                key={idx} 
+                                className={`h-2 rounded-full ${walkthroughPage === idx ? 'w-6 bg-primary' : 'w-2 bg-border'}`}
+                            />
+                        ))}
+                    </View>
+                    
+                    <TouchableOpacity 
+                        onPress={async () => {
+                            if (walkthroughPage < 2) {
+                                setWalkthroughPage(walkthroughPage + 1);
+                            } else {
+                                await AsyncStorage.setItem('hasCompletedWalkthrough', 'true');
+                                setShowWalkthrough(false);
+                                setStep('welcome');
+                            }
+                        }}
+                        className="bg-primary w-full h-14 rounded-2xl items-center justify-center flex-row shadow-lg shadow-primary/30"
+                    >
+                        <Text className="text-white font-black text-lg mr-2">
+                            {walkthroughPage === 2 ? 'Get Started' : 'Next'}
+                        </Text>
+                        <ChevronRight size={20} color="white" />
+                    </TouchableOpacity>
+                    
+                    {walkthroughPage < 2 && (
+                        <TouchableOpacity 
+                            onPress={async () => {
+                                await AsyncStorage.setItem('hasCompletedWalkthrough', 'true');
+                                setShowWalkthrough(false);
+                                setStep('welcome');
+                            }}
+                            className="items-center py-4 mt-2"
+                        >
+                            <Text className="text-textSecondary font-bold text-sm">Skip intro</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
+            </View>
+        );
+    };
+
+    if (showSplash) {
+        return (
+            <View className="flex-1 bg-primary items-center justify-center">
+                <View className="absolute -top-32 -left-32 w-96 h-96 bg-white/10 rounded-full blur-3xl" />
+                <View className="absolute -bottom-32 -right-32 w-96 h-96 bg-accent/20 rounded-full blur-3xl" />
+                <View className="items-center justify-center">
+                    <View className="w-28 h-28 bg-white rounded-[32px] items-center justify-center shadow-2xl mb-6">
+                        <Store size={56} color="#16A34A" />
+                    </View>
+                    <Text className="text-white font-black text-5xl tracking-tight">KashAm</Text>
+                    <Text className="text-white/80 font-bold text-sm mt-3 uppercase tracking-widest">Store POS & Stock</Text>
+                    <ActivityIndicator size="small" color="white" style={{ marginTop: 24 }} />
+                </View>
+            </View>
+        );
+    }
+
+    if (showWalkthrough) {
+        return renderWalkthrough();
+    }
+
     return (
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1">
             <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
@@ -747,6 +1013,170 @@ export default function LoginScreen() {
                     {step === 'signup_password' && renderSignupPassword()}
                 </View>
             </ScrollView>
+
+            {/* Forgot Password Modal Sheet */}
+            <Modal visible={forgotPasswordVisible} transparent animationType="slide">
+                <View className="flex-1 bg-black/60 justify-end">
+                    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="bg-white rounded-t-[40px] p-6" style={{ paddingBottom: Math.max(insets.bottom, 24) }}>
+                        <View className="w-12 h-1.5 bg-border rounded-full self-center mb-6" />
+                        
+                        <View className="flex-row justify-between items-center mb-6">
+                            <Text className="text-2xl font-black text-textPrimary">Reset Password</Text>
+                            <TouchableOpacity 
+                                onPress={() => { setForgotPasswordVisible(false); setForgotStep('phone'); }} 
+                                className="bg-lightBackground p-2 rounded-full"
+                            >
+                                <X size={20} color="#0F172A" />
+                            </TouchableOpacity>
+                        </View>
+
+                        {forgotStep === 'forgotStep' /* wait, forgotStep is 'phone' | 'otp' | 'password' */}
+                        {forgotStep === 'phone' && (
+                            <View>
+                                <Text className="text-textSecondary font-bold mb-6">Enter your registered phone number to verify your identity.</Text>
+                                
+                                <View className={`flex-row items-center bg-lightBackground border rounded-xl px-4 h-14 mb-2 ${forgotPhoneError ? 'border-red-500' : 'border-border'}`}>
+                                    <CountryPicker
+                                        withFilter
+                                        withCallingCode
+                                        withAlphaFilter
+                                        countryCode={countryCode}
+                                        onSelect={(country) => {
+                                            setCountryCode(country.cca2);
+                                            setCallingCode(country.callingCode[0]);
+                                        }}
+                                    />
+                                    <Text className="font-bold text-textPrimary mx-2">+{callingCode}</Text>
+                                    <TextInput 
+                                        className="flex-1 font-bold text-base text-textPrimary" 
+                                        placeholder={getPhonePlaceholder(countryCode)} 
+                                        placeholderTextColor="#94A3B8"
+                                        keyboardType="phone-pad"
+                                        value={forgotPhone}
+                                        onChangeText={(t) => { setForgotPhone(t); if (forgotPhoneError) setForgotPhoneError(''); }}
+                                        autoFocus
+                                    />
+                                </View>
+                                {forgotPhoneError ? <Text className="text-red-500 font-bold text-xs mb-6 ml-1">{forgotPhoneError}</Text> : <View className="h-4" />}
+
+                                <TouchableOpacity 
+                                    onPress={handleForgotSendOtp}
+                                    disabled={loading || !forgotPhone}
+                                    className={`w-full h-[52px] rounded-xl items-center flex-row justify-center shadow-sm ${(forgotPhone && !loading) ? 'bg-primary active:bg-[#15803D]' : 'bg-primary/50'}`}
+                                >
+                                    {loading ? <ActivityIndicator color="white" /> : (
+                                        <>
+                                            <Text className="text-white font-black text-lg mr-2">Send Reset Code</Text>
+                                            <ChevronRight size={20} color="white" />
+                                        </>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        )}
+
+                        {forgotStep === 'otp' && (
+                            <View>
+                                <Text className="text-textSecondary font-bold mb-6">We sent a 6-digit code to +{callingCode} {forgotPhone}</Text>
+                                
+                                <View className="flex-row justify-between mb-6 px-2">
+                                    {[0,1,2,3,4,5].map(i => (
+                                        <TextInput 
+                                            key={i}
+                                            ref={(ref) => forgotOtpRefs.current[i] = ref}
+                                            className={`w-12 h-14 bg-lightBackground border rounded-xl text-center text-xl font-black shadow-sm ${forgotOtp[i] ? 'border-primary text-primary' : 'border-border text-textPrimary'} ${forgotOtpError ? 'border-red-500' : ''}`}
+                                            keyboardType="number-pad"
+                                            maxLength={6}
+                                            value={forgotOtp[i]}
+                                            onChangeText={(t) => handleForgotOtpChange(t, i)}
+                                            onKeyPress={(e) => handleForgotOtpKeyPress(e, i)}
+                                            editable={forgotCountdown > 0}
+                                        />
+                                    ))}
+                                </View>
+                                {forgotOtpError ? <Text className="text-red-500 font-bold text-xs mb-6 text-center">{forgotOtpError}</Text> : null}
+
+                                <View className="flex-row justify-center items-center mb-6">
+                                    {forgotCountdown > 0 ? (
+                                        <Text className="text-textSecondary font-bold">Resend code in {forgotCountdown}s</Text>
+                                    ) : (
+                                        <TouchableOpacity onPress={handleForgotResendOtp}>
+                                            <Text className="text-primary font-bold">Resend Code</Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
+
+                                <TouchableOpacity 
+                                    onPress={handleForgotVerifyOtp}
+                                    disabled={loading || forgotOtp.join('').length !== 6 || forgotCountdown === 0}
+                                    className={`w-full h-[52px] rounded-xl items-center flex-row justify-center shadow-sm ${(forgotOtp.join('').length === 6 && forgotCountdown > 0 && !loading) ? 'bg-primary active:bg-[#15803D]' : 'bg-primary/50'}`}
+                                >
+                                    {loading ? <ActivityIndicator color="white" /> : (
+                                        <>
+                                            <Text className="text-white font-black text-lg mr-2">Verify Code</Text>
+                                            <ChevronRight size={20} color="white" />
+                                        </>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        )}
+
+                        {forgotStep === 'password' && (
+                            <View>
+                                <Text className="text-textSecondary font-bold mb-6">Create a strong new password to secure your account.</Text>
+                                
+                                <View className={`flex-row items-center bg-lightBackground border rounded-xl px-4 h-14 mb-4 ${forgotPasswordError ? 'border-red-500' : 'border-border'}`}>
+                                    <Lock size={20} color="#64748B" />
+                                    <TextInput 
+                                        className="flex-1 font-bold text-base text-textPrimary ml-3" 
+                                        placeholder="Enter new password" 
+                                        placeholderTextColor="#94A3B8"
+                                        secureTextEntry={!showPassword}
+                                        value={forgotNewPassword}
+                                        onChangeText={setForgotNewPassword}
+                                    />
+                                    <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                                        {showPassword ? <EyeOff size={20} color="#64748B" /> : <Eye size={20} color="#64748B" />}
+                                    </TouchableOpacity>
+                                </View>
+
+                                {forgotPasswordError ? <Text className="text-red-500 font-bold text-xs mb-4 ml-1">{forgotPasswordError}</Text> : null}
+
+                                <View className="bg-lightBackground rounded-xl p-4 border border-border shadow-sm mb-6">
+                                    <View className="flex-row items-center mb-2">
+                                        <ShieldCheck size={16} color={forgotHasLength ? "#16A34A" : "#CBD5E1"} />
+                                        <Text className={`ml-2 text-xs font-bold ${forgotHasLength ? 'text-primary' : 'text-textSecondary'}`}>At least 8 characters</Text>
+                                    </View>
+                                    <View className="flex-row items-center mb-2">
+                                        <ShieldCheck size={16} color={forgotHasUpper ? "#16A34A" : "#CBD5E1"} />
+                                        <Text className={`ml-2 text-xs font-bold ${forgotHasUpper ? 'text-primary' : 'text-textSecondary'}`}>One uppercase letter</Text>
+                                    </View>
+                                    <View className="flex-row items-center mb-2">
+                                        <ShieldCheck size={16} color={forgotHasNumber ? "#16A34A" : "#CBD5E1"} />
+                                        <Text className={`ml-2 text-xs font-bold ${forgotHasNumber ? 'text-primary' : 'text-textSecondary'}`}>One number</Text>
+                                    </View>
+                                    <View className="flex-row items-center">
+                                        <ShieldCheck size={16} color={forgotHasSpecial ? "#16A34A" : "#CBD5E1"} />
+                                        <Text className={`ml-2 text-xs font-bold ${forgotHasSpecial ? 'text-primary' : 'text-textSecondary'}`}>One special character</Text>
+                                    </View>
+                                </View>
+
+                                <TouchableOpacity 
+                                    onPress={handleForgotResetPassword}
+                                    disabled={loading || !isForgotNewPasswordValid}
+                                    className={`w-full h-[52px] rounded-xl items-center flex-row justify-center shadow-lg shadow-primary/30 ${(loading || !isForgotNewPasswordValid) ? 'bg-primary/50' : 'bg-primary active:bg-[#15803D]'}`}
+                                >
+                                    {loading ? <ActivityIndicator color="white" /> : (
+                                        <>
+                                            <Text className="text-white font-black text-lg mr-2">Reset Password</Text>
+                                            <CheckCircle size={20} color="white" />
+                                        </>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        )}
+                    </KeyboardAvoidingView>
+                </View>
+            </Modal>
         </KeyboardAvoidingView>
     );
 }

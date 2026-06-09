@@ -11,6 +11,18 @@ import { useAuthStore } from '../store/authStore';
 import { pickImageFromGallery, takePhoto } from '../utils/pickImage';
 import { uploadImageToCloudinary } from '../utils/uploadImage';
 import { useSyncStore } from '../store/syncStore';
+import { API_URL } from '../config';
+
+const CATEGORIES = [
+    { label: 'Provisions', value: 'Provisions' },
+    { label: 'Beverages', value: 'Beverages' },
+    { label: 'Snacks', value: 'Snacks' },
+    { label: 'Pharmacy', value: 'Pharmacy' },
+    { label: 'Clothes', value: 'Clothes' },
+    { label: 'Electronics', value: 'Electronics' },
+    { label: 'Fresh Food', value: 'Fresh Food' },
+    { label: 'Others', value: 'Others' }
+];
 
 interface AddProductSheetProps {
     visible: boolean;
@@ -32,6 +44,11 @@ export default function AddProductSheet({ visible, onClose, onSuccess, initialBa
     const [uploading, setUploading] = useState(false);
     const [saving, setSaving] = useState(false);
 
+    // Category states
+    const [category, setCategory] = useState('Provisions');
+    const [customCategory, setCustomCategory] = useState('');
+    const [showCustomInput, setShowCustomInput] = useState(false);
+
     // Validation error states
     const [nameError, setNameError] = useState('');
     const [priceError, setPriceError] = useState('');
@@ -49,6 +66,19 @@ export default function AddProductSheet({ visible, onClose, onSuccess, initialBa
                         setName(data.name);
                         if (nameError) setNameError('');
                         if (data.imageUrl) setLocalImageUri(data.imageUrl);
+                        
+                        // Dynamic category mapping from backend
+                        if (data.category) {
+                            const matched = CATEGORIES.find(c => c.value.toLowerCase() === data.category.toLowerCase());
+                            if (matched && matched.value !== 'Others') {
+                                setCategory(matched.value);
+                                setShowCustomInput(false);
+                            } else {
+                                setCategory('Others');
+                                setCustomCategory(data.category === 'Others' ? '' : data.category);
+                                setShowCustomInput(true);
+                            }
+                        }
                         return;
                     }
                 }
@@ -85,6 +115,7 @@ export default function AddProductSheet({ visible, onClose, onSuccess, initialBa
     const resetForm = () => {
         setName(''); setPrice(''); setStock(''); setBarcode(''); setLocalImageUri(null);
         setNameError(''); setPriceError(''); setStockError('');
+        setCategory('Provisions'); setCustomCategory(''); setShowCustomInput(false);
     };
 
     const handleSave = async () => {
@@ -119,7 +150,6 @@ export default function AddProductSheet({ visible, onClose, onSuccess, initialBa
             let imageUrl: string | null = null;
             if (localImageUri) {
                 if (!isOnline) {
-                    // If it's a remote URL (from catalogue), keep it. If it's local, warn.
                     if (!localImageUri.startsWith('http')) {
                         Alert.alert('Offline', "You're offline — the image will not be uploaded.");
                     } else {
@@ -133,7 +163,24 @@ export default function AddProductSheet({ visible, onClose, onSuccess, initialBa
                     imageUrl = localImageUri;
                 }
             }
-            await createProduct(uuidv4(), name, parseFloat(price), parseInt(stock, 10), barcode || null, imageUrl, userId || '', null);
+            
+            const finalCategory = category === 'Others' ? (customCategory.trim() || 'Others') : category;
+            await createProduct(uuidv4(), name, parseFloat(price), parseInt(stock, 10), barcode || null, imageUrl, userId || '', null, finalCategory);
+            
+            // Contribute to the shared catalogue if enabled with barcode
+            if (barcode && isOnline) {
+                fetch(`${API_URL}/catalogue/contribute`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        barcode,
+                        name,
+                        imageUrl,
+                        category: finalCategory
+                    })
+                }).catch(e => console.log('Contribution failed', e));
+            }
+
             resetForm();
             onSuccess();
             onClose();
@@ -172,7 +219,7 @@ export default function AddProductSheet({ visible, onClose, onSuccess, initialBa
                                     <Image source={{ uri: localImageUri }} style={{ width: 120, height: 120 }} />
                                     <TouchableOpacity
                                         onPress={() => setLocalImageUri(null)}
-                                        className="absolute top-1 right-1 bg-black/60 rounded-full p-1"
+                                        className="absolute top-2 right-2 bg-black/60 rounded-full p-1"
                                     >
                                         <X size={12} color="white" />
                                     </TouchableOpacity>
@@ -218,6 +265,36 @@ export default function AddProductSheet({ visible, onClose, onSuccess, initialBa
                                 {stockError ? <Text className="text-red-500 font-bold text-[10px] mt-1 ml-1">{stockError}</Text> : null}
                             </View>
                         </View>
+
+                        <Text className="text-textSecondary text-[10px] font-black uppercase mb-2 ml-1">Category</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-4">
+                            <View className="flex-row gap-2">
+                                {CATEGORIES.map((cat) => (
+                                    <TouchableOpacity
+                                        key={cat.value}
+                                        onPress={() => {
+                                            setCategory(cat.value);
+                                            setShowCustomInput(cat.value === 'Others');
+                                        }}
+                                        className={`px-4 py-2 rounded-full border ${category === cat.value ? 'bg-primary border-primary' : 'bg-lightBackground border-border'}`}
+                                    >
+                                        <Text className={`font-black text-[11px] ${category === cat.value ? 'text-white' : 'text-textPrimary'}`}>
+                                            {cat.label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </ScrollView>
+
+                        {showCustomInput && (
+                            <TextInput placeholderTextColor="#94A3B8"
+                                className="bg-lightBackground border border-border p-4 rounded-xl font-bold mb-4 text-textPrimary"
+                                placeholder="Enter Custom Category"
+                                value={customCategory}
+                                onChangeText={setCustomCategory}
+                            />
+                        )}
+
                         <View className="flex-row items-center bg-lightBackground border border-border rounded-xl pr-2 mb-6">
                             <TextInput placeholderTextColor="#94A3B8"
                                 className="flex-1 p-4 font-bold text-textPrimary"

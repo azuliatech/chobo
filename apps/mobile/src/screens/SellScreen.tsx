@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import * as LocalAuthentication from 'expo-local-authentication';
-import * as SecureStore from 'expo-secure-store';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     View, Text, TouchableOpacity, Modal, Image, TextInput, ScrollView,
-    Platform, UIManager, Alert, Dimensions, ActivityIndicator, Share, KeyboardAvoidingView
+    Platform, UIManager, Alert, Dimensions, ActivityIndicator, Share, KeyboardAvoidingView, Vibration
 } from 'react-native';
+import { Audio } from 'expo-av';
 import {
     getProducts, 
     createSale, 
@@ -43,7 +42,6 @@ import {
     ArrowLeftRight,
     Clock,
     Pencil,
-    Fingerprint,
     PackageSearch,
     Package,
     Sparkles
@@ -130,9 +128,6 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
     const [miniProductName, setMiniProductName] = useState('');
     const [miniProductPrice, setMiniProductPrice] = useState('');
     
-    // Biometric Prompt State
-    const [biometricPromptVisible, setBiometricPromptVisible] = useState(false);
-    
     // Checkout State
     const [checkoutVisible, setCheckoutVisible] = useState(false);
     const [successVisible, setSuccessVisible] = useState(false);
@@ -145,9 +140,12 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
     // Total override and Customer Info
     const [customerName, setCustomerName] = useState('');
     const [customerPhone, setCustomerPhone] = useState('');
+    const [customerNameError, setCustomerNameError] = useState('');
     const [finalPaidAmount, setFinalPaidAmount] = useState('');
     const [totalEditMode, setTotalEditMode] = useState(false);
     const [saleLoading, setSaleLoading] = useState(false);
+
+    const soundRef = useRef<Audio.Sound | null>(null);
 
     const [permission, requestPermission] = useCameraPermissions();
     const { items, total, addItem, updateQuantity, clearCart } = useCartStore();
@@ -174,24 +172,6 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
             setHasFirstSaleCompleted(val === 'true');
         };
         checkFirstSale();
-    }, []);
-
-    useEffect(() => {
-        const checkBiometricPrompt = async () => {
-            const hasPrompted = await SecureStore.getItemAsync('hasPromptedBiometric');
-            if (hasPrompted === 'true') return;
-
-            const enabled = await SecureStore.getItemAsync('biometricEnabled');
-            if (enabled === 'true') return;
-
-            const compatible = await LocalAuthentication.hasHardwareAsync();
-            const enrolled = await LocalAuthentication.isEnrolledAsync();
-
-            if (compatible && enrolled) {
-                setBiometricPromptVisible(true);
-            }
-        };
-        setTimeout(checkBiometricPrompt, 1000);
     }, []);
 
     useEffect(() => {
@@ -229,9 +209,8 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
     };
 
     const handleProductPress = (product: any) => {
-        const cartItem = items.find(i => i.productId === product.id);
-        const inCartQty = cartItem ? cartItem.quantity : 0;
-        if (product.stock - inCartQty <= 0) return; // Prevent adding if no stock
+        // Haptic vibration feedback on product tap
+        Vibration.vibrate(30);
         addItem(product);
     };
 
@@ -239,10 +218,7 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
         const item = items.find(i => i.productId === productId);
         if (!item) return;
         
-        const product = products.find(p => p.id === productId);
         const newQty = item.quantity + delta;
-        if (delta > 0 && product && product.stock - newQty < 0) return; // Stock check
-        
         updateQuantity(productId, newQty);
     };
 
@@ -259,10 +235,25 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
         if (scanned) return;
         setScanned(true);
 
-        const match = products.find(p => p.barcode === data);
+        const match = products.find(p => p.barcode && p.barcode.trim() === data.trim());
         if (match) {
             handleProductPress(match);
-            // Alert.alert('Added', `${match.name} added to cart`, [{ text: 'OK', onPress: () => setScanned(false) }]);
+            // Play ping sound on successful scan
+            (async () => {
+                try {
+                    await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+                    const { sound } = await Audio.Sound.createAsync(
+                        { uri: 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg' },
+                        { shouldPlay: true, volume: 0.7 }
+                    );
+                    soundRef.current = sound;
+                    sound.setOnPlaybackStatusUpdate((status: any) => {
+                        if (status.didJustFinish) sound.unloadAsync();
+                    });
+                } catch (e) {
+                    // Sound not critical — fail silently
+                }
+            })();
             // Auto-reset scan after 1.5s for continuous scanning
             setTimeout(() => setScanned(false), 1500);
         } else {
@@ -324,7 +315,7 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
 
     const executeSale = async (method: PaymentType) => {
         if (method === 'PAY_LATER' && !customerName.trim()) {
-            Alert.alert('Required', 'Customer Name is required for Pay Later sales.');
+            setCustomerNameError('Customer name is required for Pay Later sales');
             return;
         }
         if (!userId) { Alert.alert('Error', 'Not logged in'); return; }
@@ -369,6 +360,7 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
             setCheckoutVisible(false);
             setCustomerName('');
             setCustomerPhone('');
+            setCustomerNameError('');
             setSelectedPaymentType(null);
             loadData();
             setTimeout(() => setSuccessVisible(false), 2000);
@@ -412,9 +404,8 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
         return (
             <TouchableOpacity 
                 onPress={() => handleProductPress(item)}
-                disabled={isOutOfStock}
                 style={{ width: ITEM_WIDTH }}
-                className={`bg-white rounded-2xl p-4 mb-4 ${isSelected ? 'border-2 border-primary bg-primaryLight/30' : 'border border-border'} ${isOutOfStock ? 'opacity-50' : ''}`}
+                className={`bg-white rounded-2xl p-4 mb-4 ${isSelected ? 'border-2 border-primary bg-primaryLight/30' : 'border border-border'}`}
             >
                 {isSelected && (
                     <View className="absolute -top-2 -right-2 bg-primary min-w-[24px] h-[24px] rounded-full items-center justify-center z-10 border-2 border-white px-1">
@@ -423,13 +414,13 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
                 )}
 
                 <View className="w-full aspect-square rounded-2xl overflow-hidden mb-3 bg-lightBackground">
-                                    {item.image_uri ? (
-                    <Image source={{ uri: item.image_uri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                ) : (
-                    <View className="w-full h-full items-center justify-center bg-primaryLight">
-                        <Text className="text-primaryDark font-bold text-xl">{getInitials(item.name)}</Text>
-                    </View>
-                )}
+                    {item.image_uri ? (
+                        <Image source={{ uri: item.image_uri }} className="w-full h-full" resizeMode="cover" />
+                    ) : (
+                        <View className="w-full h-full items-center justify-center bg-primaryLight">
+                            <Text className="text-primaryDark font-bold text-xl">{getInitials(item.name)}</Text>
+                        </View>
+                    )}
                 </View>
                 <Text className="font-bold text-sm text-textPrimary text-center mb-1" numberOfLines={2}>{item.name}</Text>
                 <Text className="text-primary font-black text-base text-center mb-2">{formatAmount(item.price)}</Text>
@@ -875,11 +866,14 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
                             <Text className="text-textSecondary text-xs font-black uppercase mb-3 mt-2">Customer Details {selectedPaymentType === 'PAY_LATER' ? '(Required)' : '(Optional)'}</Text>
                             <View className="mb-8">
                                 <TextInput placeholderTextColor="#94A3B8" 
-                                    className="bg-lightBackground border border-border p-4 rounded-xl font-bold mb-3 text-textPrimary" 
+                                    className={`bg-lightBackground border p-4 rounded-xl font-bold mb-1 text-textPrimary ${customerNameError && selectedPaymentType === 'PAY_LATER' ? 'border-red-500' : 'border-border'}`}
                                     placeholder="Customer Name"
                                     value={customerName}
-                                    onChangeText={setCustomerName}
+                                    onChangeText={(t) => { setCustomerName(t); if (customerNameError) setCustomerNameError(''); }}
                                 />
+                                {customerNameError && selectedPaymentType === 'PAY_LATER' && (
+                                    <Text className="text-red-500 font-bold text-[10px] mb-2 ml-1">{customerNameError}</Text>
+                                )}
                                 <TextInput placeholderTextColor="#94A3B8" 
                                     className="bg-lightBackground border border-border p-4 rounded-xl font-bold text-textPrimary" 
                                     placeholder="Phone Number"
@@ -907,33 +901,6 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
                         </View>
                     </View>
                 </KeyboardAvoidingView>
-            </Modal>
-
-            {/* Biometric Prompt Modal */}
-            <Modal visible={biometricPromptVisible} animationType="fade" transparent>
-                <View className="flex-1 justify-center items-center bg-black/60 px-6">
-                    <View className="bg-white rounded-3xl p-8 items-center w-full shadow-2xl">
-                        <View className="w-16 h-16 bg-lightGreen rounded-full items-center justify-center mb-6">
-                            <Fingerprint size={32} color="#16A34A" />
-                        </View>
-                        <Text className="text-xl font-black text-textPrimary text-center mb-2">Enable Biometric Login?</Text>
-                        <Text className="text-textSecondary font-bold text-center mb-8">Use your fingerprint or Face ID for faster, secure access next time.</Text>
-                        
-                        <TouchableOpacity 
-                            onPress={handleEnableBiometric}
-                            className="w-full h-14 bg-primary rounded-xl items-center justify-center mb-4"
-                        >
-                            <Text className="text-white font-black text-lg">Enable Now</Text>
-                        </TouchableOpacity>
-                        
-                        <TouchableOpacity 
-                            onPress={handleDeclineBiometric}
-                            className="w-full h-14 rounded-xl items-center justify-center bg-lightBackground"
-                        >
-                            <Text className="text-textSecondary font-bold">Maybe Later</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
             </Modal>
 
             {successVisible && (
