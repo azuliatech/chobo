@@ -1,6 +1,8 @@
 import './global.css';
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, Keyboard } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, Keyboard, Modal } from 'react-native';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
 import { StatusBar } from 'expo-status-bar';
 import { initDatabase, getProducts, createProduct } from './src/db';
 import SellScreen from './src/screens/SellScreen';
@@ -9,10 +11,11 @@ import TransactionScreen from './src/screens/TransactionScreen';
 import OverviewScreen from './src/screens/OverviewScreen';
 import MoreScreen from './src/screens/MoreScreen';
 import LoginScreen from './src/screens/LoginScreen';
+import SubscriptionScreen from './src/screens/SubscriptionScreen';
 import { useAuthStore } from './src/store/authStore';
 import { useSyncStore } from './src/store/syncStore';
 import { useCurrencyStore } from './src/hooks/useCurrency';
-import { pushSalesToBackend } from './src/services/syncService';
+import { pushSalesToBackend, buildHeaders } from './src/services/syncService';
 import { syncProductsFromBackend } from './src/services/productSyncService';
 import { API_URL } from './src/config';
 import { ShoppingCart, Package, Wallet, BarChart2, Menu } from 'lucide-react-native';
@@ -33,8 +36,60 @@ export default function App() {
   const [initialBarcode, setInitialBarcode] = useState<string | null>(null);
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
 
-  const { token, userId, isReady: authReady, restoreToken } = useAuthStore();
+  const { token, userId, activeStoreOwnerId, isReady: authReady, restoreToken, showSubscriptionModal, setShowSubscriptionModal } = useAuthStore();
   const { setIsOnline, isOnline } = useSyncStore();
+
+  // ── Push Notifications setup ───────────────────────────────────────────────
+  useEffect(() => {
+    // Show notifications even while app is in foreground
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+      }),
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!token || !userId) return;
+
+    const registerPushToken = async () => {
+      try {
+        if (!Device.isDevice) return; // skip emulators
+
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        let finalStatus = existingStatus;
+
+        if (existingStatus !== 'granted') {
+          const { status } = await Notifications.requestPermissionsAsync();
+          finalStatus = status;
+        }
+
+        if (finalStatus !== 'granted') {
+          console.log('[Push] Permission not granted — skipping token registration');
+          return;
+        }
+
+        const pushToken = await Notifications.getExpoPushTokenAsync();
+        const expo_push_token = pushToken.data;
+
+        await fetch(`${API_URL}/auth/push-token`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ expo_push_token }),
+        });
+        console.log('[Push] Token registered:', expo_push_token);
+      } catch (e) {
+        console.warn('[Push] Token registration failed:', e);
+      }
+    };
+
+    registerPushToken();
+  }, [token, userId]);
 
   useEffect(() => {
     initDatabase()
@@ -85,7 +140,7 @@ export default function App() {
           if (localProducts.length === 0) {
             console.log('[Restore] Local DB empty, attempting restore...');
             const response = await fetch(`${API_URL}/user-products/restore`, {
-              headers: { 'Authorization': `Bearer ${token}` },
+              headers: buildHeaders(token, activeStoreOwnerId),
             });
 
             if (response.ok) {
@@ -188,6 +243,15 @@ export default function App() {
             })}
           </View>
         )}
+
+        <Modal
+          visible={showSubscriptionModal}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setShowSubscriptionModal(false)}
+        >
+          <SubscriptionScreen onBack={() => setShowSubscriptionModal(false)} />
+        </Modal>
       </View>
     </SafeAreaProvider>
   );

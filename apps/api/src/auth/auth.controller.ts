@@ -2,182 +2,294 @@ import {
     Controller,
     Post,
     Get,
-    Delete,
     Body,
-    Param,
+    Query,
     HttpCode,
     HttpStatus,
-    UnauthorizedException,
     BadRequestException,
     UseGuards,
     Request,
+    Header,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { SmsService } from './sms.service';
 import { AuthGuard } from './auth.guard';
 
 @Controller('auth')
 export class AuthController {
-    constructor(
-        private authService: AuthService,
-        private smsService: SmsService,
-    ) {}
+    constructor(private authService: AuthService) {}
 
-    // ---- Standard Auth ----
+    // ── Registration & Verification ───────────────────────────────────────────
+
+    @Post('register')
+    register(@Body() body: Record<string, any>) {
+        if (!body.email || !body.password) {
+            throw new BadRequestException('Email and password are required');
+        }
+        return this.authService.register(
+            body.email,
+            body.password,
+            body.name,
+            body.country_code,
+            body.tos_accepted,
+            body.business_name,
+            body.business_type,
+        );
+    }
+
+    @Get('verify-email')
+    verifyEmail(@Query('token') token: string) {
+        if (!token) throw new BadRequestException('Verification token is required');
+        return this.authService.verifyEmail(token);
+    }
+
+    @HttpCode(HttpStatus.OK)
+    @Post('resend-verification')
+    resendVerification(@Body() body: Record<string, any>) {
+        if (!body.email) throw new BadRequestException('Email is required');
+        return this.authService.resendVerification(body.email);
+    }
+
+    // ── Login ─────────────────────────────────────────────────────────────────
 
     @HttpCode(HttpStatus.OK)
     @Post('login')
     login(@Body() body: Record<string, any>) {
-        return this.authService.login(body.phone, body.password);
+        if (!body.email || !body.password) {
+            throw new BadRequestException('Email and password are required');
+        }
+        return this.authService.login(body.email, body.password);
     }
 
-    @Post('register')
-    register(@Body() body: Record<string, any>) {
-        return this.authService.register(
-            body.phone,
-            body.password,
-            body.business_name,
-            body.business_type,
-            body.country_code,
-        );
+    // ── Google OAuth ──────────────────────────────────────────────────────────
+
+    @HttpCode(HttpStatus.OK)
+    @Post('google')
+    googleAuth(@Body() body: Record<string, any>) {
+        if (!body.id_token) throw new BadRequestException('Google ID token is required');
+        return this.authService.googleAuth(body.id_token);
     }
+
+    // ── Token Refresh ─────────────────────────────────────────────────────────
 
     @HttpCode(HttpStatus.OK)
     @Post('refresh')
     refresh(@Body() body: Record<string, any>) {
+        if (!body.refresh_token) throw new BadRequestException('Refresh token is required');
         return this.authService.refreshTokens(body.refresh_token);
     }
 
-    // ---- OTP (Termii SMS) ----
-
-    @HttpCode(HttpStatus.OK)
-    @Post('send-otp')
-    async sendOtp(@Body() body: Record<string, any>) {
-        if (!body.phone) {
-            throw new BadRequestException('Phone number is required');
-        }
-        const exists = await this.authService.checkPhoneRegistered(body.phone);
-        if (exists) {
-            throw new BadRequestException('This phone number is already registered');
-        }
-        try {
-            const pinId = await this.smsService.sendOtp(body.phone);
-            return { success: true, pinId };
-        } catch (e: any) {
-            throw new BadRequestException(e.message || 'Could not send SMS verification code');
-        }
-    }
-
-    @HttpCode(HttpStatus.OK)
-    @Post('verify-otp')
-    async verifyOtp(@Body() body: Record<string, any>) {
-        const pinId = body.pin_id || body.pinId;
-        const pin = body.pin;
-
-        if (!pinId || !pin) {
-            throw new BadRequestException('Pin ID and verification code are required');
-        }
-
-        const isValid = await this.smsService.verifyOtp(pinId, pin);
-        if (!isValid) {
-            throw new UnauthorizedException('Verification code is invalid or expired');
-        }
-
-        return { success: true };
-    }
+    // ── Password Management ───────────────────────────────────────────────────
 
     @HttpCode(HttpStatus.OK)
     @Post('forgot-password')
-    async forgotPassword(@Body() body: Record<string, any>) {
-        if (!body.phone) {
-            throw new BadRequestException('Phone number is required');
-        }
-        const exists = await this.authService.checkPhoneRegistered(body.phone);
-        if (!exists) {
-            throw new BadRequestException('This phone number is not registered');
-        }
-        try {
-            const formatted = body.phone.startsWith('+') ? body.phone : `+${body.phone.replace(/\D/g, '')}`;
-            const pinId = await this.smsService.sendOtp(formatted);
-            return { success: true, pinId };
-        } catch (e: any) {
-            throw new BadRequestException(e.message || 'Could not send SMS verification code');
-        }
+    forgotPassword(@Body() body: Record<string, any>) {
+        if (!body.email) throw new BadRequestException('Email is required');
+        return this.authService.forgotPassword(body.email);
+    }
+
+    @Get('reset-password')
+    @Header('Content-Type', 'text/html')
+    renderResetPasswordPage(@Query('token') token: string) {
+        if (!token) throw new BadRequestException('Token is required');
+        return `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Reset Your KashAm Password</title>
+                <style>
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                        background-color: #f3f4f6;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        min-height: 100vh;
+                        margin: 0;
+                        padding: 16px;
+                        box-sizing: border-box;
+                    }
+                    .card {
+                        background: white;
+                        padding: 32px;
+                        border-radius: 16px;
+                        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+                        width: 100%;
+                        max-width: 400px;
+                        box-sizing: border-box;
+                    }
+                    h2 {
+                        color: #111827;
+                        margin-top: 0;
+                        margin-bottom: 8px;
+                        font-size: 24px;
+                        font-weight: 800;
+                    }
+                    p {
+                        color: #6b7280;
+                        font-size: 14px;
+                        margin-bottom: 24px;
+                    }
+                    .form-group {
+                        margin-bottom: 20px;
+                    }
+                    label {
+                        display: block;
+                        color: #374151;
+                        font-size: 13px;
+                        font-weight: 600;
+                        margin-bottom: 6px;
+                    }
+                    input {
+                        width: 100%;
+                        padding: 12px;
+                        border: 1px solid #d1d5db;
+                        border-radius: 8px;
+                        font-size: 16px;
+                        box-sizing: border-box;
+                    }
+                    input:focus {
+                        outline: none;
+                        border-color: #16a34a;
+                        box-shadow: 0 0 0 3px rgba(22,163,74,0.1);
+                    }
+                    button {
+                        width: 100%;
+                        background-color: #16a34a;
+                        color: white;
+                        border: none;
+                        padding: 14px;
+                        font-size: 16px;
+                        font-weight: 600;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        transition: background-color 0.2s;
+                    }
+                    button:hover {
+                        background-color: #15803d;
+                    }
+                    .message {
+                        display: none;
+                        margin-top: 16px;
+                        padding: 12px;
+                        border-radius: 8px;
+                        font-size: 14px;
+                        text-align: center;
+                    }
+                    .success {
+                        background-color: #f0fdf4;
+                        color: #166534;
+                        border: 1px solid #bbf7d0;
+                    }
+                    .error {
+                        background-color: #fef2f2;
+                        color: #991b1b;
+                        border: 1px solid #fca5a5;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <h2>Reset Password</h2>
+                    <p style="margin-bottom: 20px;">Please enter a new password for your KashAm account.</p>
+                    <form id="resetForm" onsubmit="handleSubmit(event)">
+                        <div class="form-group">
+                            <label for="password">New Password</label>
+                            <input type="password" id="password" required minlength="8" placeholder="At least 8 characters">
+                        </div>
+                        <div class="form-group">
+                            <label for="confirmPassword">Confirm Password</label>
+                            <input type="password" id="confirmPassword" required minlength="8" placeholder="Repeat new password">
+                        </div>
+                        <button type="submit" id="submitBtn">Update Password</button>
+                    </form>
+                    <div id="msg" class="message"></div>
+                </div>
+
+                <script>
+                    async function handleSubmit(event) {
+                        event.preventDefault();
+                        const password = document.getElementById('password').value;
+                        const confirmPassword = document.getElementById('confirmPassword').value;
+                        const msg = document.getElementById('msg');
+                        const submitBtn = document.getElementById('submitBtn');
+
+                        if (password !== confirmPassword) {
+                            msg.className = 'message error';
+                            msg.textContent = 'Passwords do not match';
+                            msg.style.display = 'block';
+                            return;
+                        }
+
+                        submitBtn.disabled = true;
+                        submitBtn.textContent = 'Updating...';
+                        msg.style.display = 'none';
+
+                        try {
+                            const res = await fetch('/api/v1/auth/reset-password', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ token: '${token}', new_password: password })
+                            });
+                            const data = await res.json();
+                            if (res.ok) {
+                                msg.className = 'message success';
+                                msg.textContent = 'Password reset successfully! You can now close this tab and log in to the app.';
+                                msg.style.display = 'block';
+                                document.getElementById('resetForm').style.display = 'none';
+                            } else {
+                                msg.className = 'message error';
+                                msg.textContent = data.message || 'Failed to reset password';
+                                msg.style.display = 'block';
+                                submitBtn.disabled = false;
+                                submitBtn.textContent = 'Update Password';
+                            }
+                        } catch (e) {
+                            msg.className = 'message error';
+                            msg.textContent = 'An error occurred. Please try again.';
+                            msg.style.display = 'block';
+                            submitBtn.disabled = false;
+                            submitBtn.textContent = 'Update Password';
+                        }
+                    }
+                </script>
+            </body>
+            </html>
+        `;
     }
 
     @HttpCode(HttpStatus.OK)
     @Post('reset-password')
-    async resetPassword(@Body() body: Record<string, any>) {
-        const pinId = body.pin_id || body.pinId;
-        const pin = body.pin;
-        const phone = body.phone;
-        const newPassword = body.newPassword || body.password;
-
-        if (!pinId || !pin || !phone || !newPassword) {
-            throw new BadRequestException('Phone, Pin ID, verification code, and new password are required');
+    resetPassword(@Body() body: Record<string, any>) {
+        if (!body.token || !body.new_password) {
+            throw new BadRequestException('Token and new password are required');
         }
-
-        const isValid = await this.smsService.verifyOtp(pinId, pin);
-        if (!isValid) {
-            throw new UnauthorizedException('Verification code is invalid or expired');
-        }
-
-        return this.authService.resetPassword(phone, newPassword);
+        return this.authService.resetPassword(body.token, body.new_password);
     }
 
-    // ---- Staff Management (Owner-only routes) ----
+    // ── Push Notification Token ───────────────────────────────────────────────
 
-    /**
-     * GET /auth/me/stores
-     * Returns all stores the logged-in user owns or is staff at.
-     */
     @UseGuards(AuthGuard)
-    @Get('me/stores')
-    getMyStores(@Request() req: any) {
-        return this.authService.getMyStores(req.user.sub);
+    @HttpCode(HttpStatus.OK)
+    @Post('push-token')
+    updatePushToken(@Request() req: any, @Body() body: Record<string, any>) {
+        if (!body.expo_push_token) throw new BadRequestException('Expo push token is required');
+        return this.authService.updatePushToken(req.user.sub, body.expo_push_token);
     }
 
-    /**
-     * POST /auth/staff/add
-     * Owner adds a staff member by phone number.
-     * Body: { phone, role: 'MANAGER' | 'CASHIER', name? }
-     */
+    // ── My Workspaces ─────────────────────────────────────────────────────────
+
     @UseGuards(AuthGuard)
-    @Post('staff/add')
-    addStaff(@Request() req: any, @Body() body: Record<string, any>) {
-        if (!body.phone || !body.role) {
-            throw new BadRequestException('Phone number and role are required');
-        }
-        return this.authService.addStaff(req.user.sub, body.phone, body.role, body.name);
+    @Get('me/workspaces')
+    getMyWorkspaces(@Request() req: any) {
+        return this.authService.getMyWorkspaces(req.user.sub);
     }
 
-    /**
-     * GET /auth/staff
-     * Owner retrieves all active staff in their store.
-     */
-    @UseGuards(AuthGuard)
-    @Get('staff')
-    getStoreStaff(@Request() req: any) {
-        return this.authService.getStoreStaff(req.user.sub);
-    }
+    // ── Me ────────────────────────────────────────────────────────────────────
 
-    /**
-     * DELETE /auth/staff/:linkId
-     * Owner removes a staff member from their store by StaffLink ID.
-     */
     @UseGuards(AuthGuard)
-    @Delete('staff/:linkId')
-    removeStaff(@Request() req: any, @Param('linkId') linkId: string) {
-        return this.authService.removeStaff(req.user.sub, linkId);
-    }
-
-    /**
-     * DELETE /auth/staff/leave/:ownerId
-     * Staff member independently exits a store.
-     */
-    @UseGuards(AuthGuard)
-    @Delete('staff/leave/:ownerId')
-    leaveStore(@Request() req: any, @Param('ownerId') ownerId: string) {
-        return this.authService.leaveStore(req.user.sub, ownerId);
+    @Get('me')
+    getMe(@Request() req: any) {
+        return { user_id: req.user.sub, email: req.user.email };
     }
 }

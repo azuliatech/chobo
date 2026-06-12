@@ -17,24 +17,24 @@ import {
     Users,
     ChevronRight,
     X,
-    Phone,
+    Mail,
 } from 'lucide-react-native';
 import { useAuthStore } from '../store/authStore';
 import { buildHeaders } from '../services/syncService';
 import { API_URL } from '../config';
 
 interface StaffMember {
-    linkId: string;
+    memberId: string;
     userId: string;
-    phone: string;
+    email: string;
     name: string | null;
-    role: 'MANAGER' | 'CASHIER';
+    role: 'MANAGER' | 'STAFF';
     joinedAt: string;
 }
 
 const ROLE_COLORS = {
     MANAGER: { bg: '#ECFDF5', text: '#059669', border: '#A7F3D0' },
-    CASHIER: { bg: '#FFFBEB', text: '#D97706', border: '#FDE68A' },
+    STAFF: { bg: '#FFFBEB', text: '#D97706', border: '#FDE68A' },
 };
 
 interface Props {
@@ -42,70 +42,69 @@ interface Props {
 }
 
 export default function StaffManagementScreen({ onBack }: Props) {
-    const { token } = useAuthStore();
+    const { token, activeStoreOwnerId } = useAuthStore(); // activeStoreOwnerId holds the workspaceId
     const [staff, setStaff] = useState<StaffMember[]>([]);
     const [loading, setLoading] = useState(true);
     const [showAddModal, setShowAddModal] = useState(false);
 
     // Add staff form state
-    const [newPhone, setNewPhone] = useState('');
-    const [newRole, setNewRole] = useState<'MANAGER' | 'CASHIER'>('CASHIER');
-    const [newName, setNewName] = useState('');
+    const [newEmail, setNewEmail] = useState('');
+    const [newRole, setNewRole] = useState<'MANAGER' | 'STAFF'>('STAFF');
     const [adding, setAdding] = useState(false);
 
     const loadStaff = useCallback(async () => {
-        if (!token) return;
+        if (!token || !activeStoreOwnerId) return;
         setLoading(true);
         try {
-            const res = await fetch(`${API_URL}/auth/staff`, {
-                headers: buildHeaders(token),
+            const res = await fetch(`${API_URL}/workspaces/${activeStoreOwnerId}/members`, {
+                headers: buildHeaders(token, activeStoreOwnerId),
             });
             if (res.ok) {
                 const data = await res.json();
-                setStaff(data);
+                // Filter out the OWNER (which is the business owner themselves)
+                const nonOwners = data.filter((m: any) => m.role !== 'OWNER');
+                setStaff(nonOwners);
             }
         } catch (e) {
             console.error('Failed to load staff', e);
         } finally {
             setLoading(false);
         }
-    }, [token]);
+    }, [token, activeStoreOwnerId]);
 
     useEffect(() => {
         loadStaff();
     }, [loadStaff]);
 
     const handleAddStaff = async () => {
-        if (!newPhone.trim()) {
-            Alert.alert('Error', 'Please enter the staff member\'s phone number');
+        if (!newEmail.trim() || !newEmail.includes('@')) {
+            Alert.alert('Error', 'Please enter a valid email address');
             return;
         }
 
         setAdding(true);
         try {
-            const res = await fetch(`${API_URL}/auth/staff/add`, {
+            const res = await fetch(`${API_URL}/workspaces/${activeStoreOwnerId}/members`, {
                 method: 'POST',
-                headers: buildHeaders(token!),
+                headers: buildHeaders(token!, activeStoreOwnerId),
                 body: JSON.stringify({
-                    phone: newPhone.trim(),
+                    email: newEmail.trim().toLowerCase(),
                     role: newRole,
-                    name: newName.trim() || undefined,
                 }),
             });
             const data = await res.json();
 
             if (res.ok) {
-                const isNew = data.isNewAccount;
+                const isNew = data.isNewUser;
                 Alert.alert(
                     'Staff Added ✓',
                     isNew
-                        ? `Account created for ${data.phone}.\n\nTheir temporary password is the last 6 digits of their phone number. Ask them to change it after first login.`
-                        : `${data.phone} has been added to your store as ${newRole}.`,
+                        ? `An invitation and temporary password (${data.isNewUser ? 'check email' : ''}) have been sent to ${newEmail}. They can now log in.`
+                        : `${newEmail} has been added to your store as ${newRole}.`,
                 );
                 setShowAddModal(false);
-                setNewPhone('');
-                setNewName('');
-                setNewRole('CASHIER');
+                setNewEmail('');
+                setNewRole('STAFF');
                 loadStaff();
             } else {
                 Alert.alert('Failed', data.message || 'Could not add staff member');
@@ -120,7 +119,7 @@ export default function StaffManagementScreen({ onBack }: Props) {
     const handleRemove = (member: StaffMember) => {
         Alert.alert(
             'Remove Staff',
-            `Remove ${member.name || member.phone} from your store? They will lose access immediately.`,
+            `Remove ${member.name || member.email} from your store? They will lose access immediately.`,
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
@@ -128,9 +127,9 @@ export default function StaffManagementScreen({ onBack }: Props) {
                     style: 'destructive',
                     onPress: async () => {
                         try {
-                            const res = await fetch(`${API_URL}/auth/staff/${member.linkId}`, {
+                            const res = await fetch(`${API_URL}/workspaces/${activeStoreOwnerId}/members/${member.memberId}`, {
                                 method: 'DELETE',
-                                headers: buildHeaders(token!),
+                                headers: buildHeaders(token!, activeStoreOwnerId),
                             });
                             if (res.ok) {
                                 loadStaff();
@@ -178,41 +177,41 @@ export default function StaffManagementScreen({ onBack }: Props) {
             {/* Staff List */}
             {loading ? (
                 <View className="flex-1 items-center justify-center">
-                    <ActivityIndicator size="large" color="#7C5CFC" />
+                    <ActivityIndicator size="large" color="#16A34A" />
                 </View>
             ) : staff.length === 0 ? (
                 <View className="flex-1 items-center justify-center px-8 opacity-50">
                     <Users size={64} color="#64748B" />
                     <Text className="font-black text-xl text-textPrimary mt-4 text-center">No staff yet</Text>
                     <Text className="text-textSecondary text-sm text-center mt-2 font-semibold">
-                        Tap the + button to add a cashier or manager to your store
+                        Tap the + button to add a staff member or manager to your store
                     </Text>
                 </View>
             ) : (
                 <FlatList
                     data={staff}
-                    keyExtractor={item => item.linkId}
+                    keyExtractor={item => item.memberId}
                     contentContainerStyle={{ padding: 24, paddingBottom: 100 }}
                     renderItem={({ item }) => {
-                        const colors = ROLE_COLORS[item.role];
+                        const colors = ROLE_COLORS[item.role] || ROLE_COLORS.STAFF;
                         return (
                             <View className="bg-white rounded-2xl p-4 mb-3 border border-border shadow-sm flex-row items-center gap-4">
                                 {/* Avatar */}
-                                <View className="w-12 h-12 rounded-2xl bg-primaryLight items-center justify-center">
+                                <View className="w-12 h-12 rounded-2xl bg-[#F0FDF4] items-center justify-center">
                                     <Text className="text-primary font-black text-lg">
-                                        {(item.name || item.phone).charAt(0).toUpperCase()}
+                                        {(item.name || item.email).charAt(0).toUpperCase()}
                                     </Text>
                                 </View>
 
                                 {/* Info */}
                                 <View className="flex-1">
                                     <Text className="font-black text-textPrimary text-sm" numberOfLines={1}>
-                                        {item.name || 'Unnamed'}
+                                        {item.name || 'Invited User'}
                                     </Text>
                                     <View className="flex-row items-center gap-1 mt-0.5">
-                                        <Phone size={10} color="#94A3B8" />
+                                        <Mail size={10} color="#94A3B8" />
                                         <Text className="text-textSecondary text-[11px] font-semibold">
-                                            {item.phone}
+                                            {item.email}
                                         </Text>
                                     </View>
                                     <Text className="text-textSecondary text-[10px] mt-1">
@@ -240,7 +239,7 @@ export default function StaffManagementScreen({ onBack }: Props) {
                                     </View>
                                     <TouchableOpacity
                                         onPress={() => handleRemove(item)}
-                                        className="p-1.5 bg-dangerLight rounded-lg"
+                                        className="p-1.5 bg-red-50 rounded-lg"
                                     >
                                         <Trash2 size={14} color="#EF4444" />
                                     </TouchableOpacity>
@@ -269,29 +268,18 @@ export default function StaffManagementScreen({ onBack }: Props) {
                         </View>
 
                         <ScrollView showsVerticalScrollIndicator={false}>
-                            {/* Phone Number */}
+                            {/* Email Address */}
                             <Text className="text-textSecondary text-[10px] font-black uppercase tracking-wider mb-2">
-                                Phone Number *
+                                Email Address *
                             </Text>
                             <TextInput
                                 className="bg-lightBackground border border-border p-4 rounded-xl font-bold mb-4 text-textPrimary"
-                                placeholder="e.g. 08012345678"
+                                placeholder="e.g. staff@company.com"
                                 placeholderTextColor="#94A3B8"
-                                keyboardType="phone-pad"
-                                value={newPhone}
-                                onChangeText={setNewPhone}
-                            />
-
-                            {/* Name (optional) */}
-                            <Text className="text-textSecondary text-[10px] font-black uppercase tracking-wider mb-2">
-                                Name (Optional)
-                            </Text>
-                            <TextInput
-                                className="bg-lightBackground border border-border p-4 rounded-xl font-bold mb-4 text-textPrimary"
-                                placeholder="e.g. Amaka"
-                                placeholderTextColor="#94A3B8"
-                                value={newName}
-                                onChangeText={setNewName}
+                                keyboardType="email-address"
+                                autoCapitalize="none"
+                                value={newEmail}
+                                onChangeText={setNewEmail}
                             />
 
                             {/* Role Picker */}
@@ -299,7 +287,7 @@ export default function StaffManagementScreen({ onBack }: Props) {
                                 Role
                             </Text>
                             <View className="flex-row gap-3 mb-6">
-                                {(['CASHIER', 'MANAGER'] as const).map(role => {
+                                {(['STAFF', 'MANAGER'] as const).map(role => {
                                     const colors = ROLE_COLORS[role];
                                     const isSelected = newRole === role;
                                     return (
@@ -316,13 +304,13 @@ export default function StaffManagementScreen({ onBack }: Props) {
                                                 className="font-black text-center text-sm"
                                                 style={{ color: isSelected ? colors.text : '#64748B' }}
                                             >
-                                                {role}
+                                                {role === 'STAFF' ? 'STAFF' : role}
                                             </Text>
                                             <Text
                                                 className="text-center text-[10px] font-semibold mt-1"
                                                 style={{ color: isSelected ? colors.text : '#94A3B8' }}
                                             >
-                                                {role === 'CASHIER'
+                                                {role === 'STAFF'
                                                     ? 'Can sell, no financial data'
                                                     : 'Can sell + edit products'}
                                             </Text>
@@ -335,7 +323,7 @@ export default function StaffManagementScreen({ onBack }: Props) {
                             <View className="bg-blue-50 border border-blue-100 rounded-xl p-3 mb-6">
                                 <Text className="text-blue-600 text-[11px] font-semibold leading-4">
                                     💡 If this person doesn't have a KashAm account yet, one will be created automatically.
-                                    Their temporary password will be the last 6 digits of their phone number.
+                                    An email invitation with their temporary password will be sent.
                                 </Text>
                             </View>
 

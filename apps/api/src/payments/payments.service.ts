@@ -1,11 +1,20 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class PaymentsService {
     constructor(private prisma: PrismaService) {}
 
-    create(data: any) {
+    async create(data: any) {
+        if (data.saleId) {
+            const sale = await this.prisma.sale.findFirst({
+                where: { id: data.saleId, workspaceId: data.workspaceId },
+            });
+            if (!sale) {
+                throw new BadRequestException('Sale does not belong to this workspace');
+            }
+        }
+
         return this.prisma.payment.upsert({
             where: { id: data.id },
             update: {

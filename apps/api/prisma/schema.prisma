@@ -10,85 +10,138 @@ datasource db {
   // url is supplied via prisma.config.ts (required by Prisma 7+)
 }
 
+// ──────────────────────────────────────────────
+// USER
+// ──────────────────────────────────────────────
 model User {
-  id           String   @id @default(uuid())
-  phone        String   @unique
-  password     String
-  shopName     String?
-  businessType String?
-  countryCode  String   @default("NG")
-  role         String   @default("OWNER") // OWNER | MANAGER | CASHIER — their own store role
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String    @id @default(uuid())
+  email           String    @unique
+  phone           String?   @unique
+  password        String?   // nullable for Google-only OAuth users
+  name            String?
+  countryCode     String    @default("NG")
+  emailVerified   Boolean   @default(false)
+  tosAccepted     Boolean   @default(false)
+  expoPushToken   String?
+  googleId        String?   @unique
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  // As an employee: all stores this user works at
-  staffLinks   StaffLink[] @relation("StaffMember")
-  // As an owner: all staff linked to this store
-  storeStaff   StaffLink[] @relation("StoreOwner")
-  // Sales recorded under this owner's store
-  sales        Sale[]
+  ownedWorkspaces  Workspace[]        @relation("WorkspaceOwner")
+  memberships      WorkspaceMember[]
+  staffSales       Sale[]             @relation("SaleStaff")
+  notifications    Notification[]
 }
 
-model StaffLink {
-  id        String   @id @default(uuid())
-  userId    String   // The employee/staff member
-  ownerId   String   // The store owner they work under
-  role      String   // MANAGER | CASHIER
-  status    String   @default("ACTIVE") // ACTIVE | REMOVED
-  createdAt DateTime @default(now())
+// ──────────────────────────────────────────────
+// WORKSPACE
+// ──────────────────────────────────────────────
+model Workspace {
+  id            String    @id @default(uuid())
+  name          String
+  businessType  String?
+  countryCode   String    @default("NG")
+  tier          String    @default("FREE") // FREE | PRO | ENTERPRISE
+  status        String    @default("ACTIVE") // ACTIVE | SUSPENDED
+  ownerId       String
+  owner         User      @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  user  User @relation("StaffMember", fields: [userId], references: [id], onDelete: Cascade)
-  owner User @relation("StoreOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members       WorkspaceMember[]
+  products      UserProduct[]
+  sales         Sale[]
+  customers     Customer[]
+  notifications Notification[]
 
-  @@unique([userId, ownerId]) // A staff member can only be linked to an owner once
-  @@index([ownerId])          // Fast lookup by owner
-  @@index([userId])           // Fast lookup by employee
+  @@index([ownerId])
 }
 
-model CatalogueProduct {
-  barcode   String  @id  // barcode is the primary key — globally unique per product
-  name      String
-  brand     String?
-  imageUrl  String?
-  category  String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model UserProduct {
+// ──────────────────────────────────────────────
+// WORKSPACE MEMBER
+// ──────────────────────────────────────────────
+model WorkspaceMember {
   id          String    @id @default(uuid())
-  userId      String    // required — no default value
-  barcode     String?   // NOT unique — multiple users can have the same barcode
-  name        String    // user can override the catalogue name
-  sellingPrice Float
-  costPrice   Float?    // optional — for profit tracking
-  stock       Int       @default(0)
-  imageUrl    String?   // user can override the catalogue image
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        String    // OWNER | MANAGER | STAFF
+  status      String    @default("ACTIVE") // ACTIVE | REMOVED
+  createdAt   DateTime  @default(now())
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId])
+  @@index([userId])
+}
+
+// ──────────────────────────────────────────────
+// EMAIL VERIFICATION TOKENS
+// ──────────────────────────────────────────────
+model EmailVerification {
+  id        String   @id @default(uuid())
+  email     String
+  token     String   @unique
+  type      String   @default("VERIFY") // VERIFY | RESET_PASSWORD
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([token])
+}
+
+// ──────────────────────────────────────────────
+// PRODUCTS
+// ──────────────────────────────────────────────
+model UserProduct {
+  id            String    @id @default(uuid())
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  barcode       String?
+  name          String
+  sellingPrice  Float
+  costPrice     Float?
+  stock         Int       @default(0)
+  imageUrl      String?
+  category      String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  saleItems     SaleItem[]
+
+  @@index([workspaceId])
+  @@index([workspaceId, barcode])
+}
+
+// ──────────────────────────────────────────────
+// CUSTOMERS
+// ──────────────────────────────────────────────
+model Customer {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  phone       String?
+  name        String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
-  saleItems   SaleItem[]
+  sales       Sale[]
+  debts       Debt[]
 
-  @@index([userId])    // index for fast per-user queries
-  @@index([userId, barcode]) // index for barcode lookup within a user's inventory
+  @@index([workspaceId])
 }
 
-model Customer {
-  id        String   @id @default(uuid())
-  phone     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  sales     Sale[]
-  debts     Debt[]
-}
-
+// ──────────────────────────────────────────────
+// SALES
+// ──────────────────────────────────────────────
 model Sale {
   id             String     @id @default(uuid())
-  userId         String?    // The store owner this sale belongs to
-  user           User?      @relation(fields: [userId], references: [id])
+  workspaceId    String
+  workspace      Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  staffId        String?    // which staff member made this sale
+  staff          User?      @relation("SaleStaff", fields: [staffId], references: [id], onDelete: SetNull)
   total          Float
   discountAmount Float      @default(0)
-  paymentType    String     // 'CASH', 'TRANSFER', 'POS', 'PAY_LATER'
+  paymentType    String     // CASH | TRANSFER | POS | PAY_LATER
   timestamp      DateTime   @default(now())
   synced         Boolean    @default(true)
   customerId     String?
@@ -99,20 +152,28 @@ model Sale {
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
-  @@index([userId])
+  @@index([workspaceId])
+  @@index([staffId])
+  @@index([workspaceId, timestamp])
 }
 
+// ──────────────────────────────────────────────
+// SALE ITEMS
+// ──────────────────────────────────────────────
 model SaleItem {
-  id          String  @id @default(uuid())
-  saleId      String
-  sale        Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  id            String       @id @default(uuid())
+  saleId        String
+  sale          Sale         @relation(fields: [saleId], references: [id], onDelete: Cascade)
   userProductId String?
-  userProduct   UserProduct? @relation(fields: [userProductId], references: [id])
-  productName String?
-  quantity    Int
-  price       Float   // Price at the time of sale
+  userProduct   UserProduct? @relation(fields: [userProductId], references: [id], onDelete: SetNull)
+  productName   String?      // snapshot at time of sale
+  quantity      Int
+  price         Float        // price at time of sale
 }
 
+// ──────────────────────────────────────────────
+// PAYMENTS
+// ──────────────────────────────────────────────
 model Payment {
   id         String   @id @default(uuid())
   amount     Float
@@ -125,23 +186,48 @@ model Payment {
   updatedAt  DateTime @updatedAt
 }
 
+// ──────────────────────────────────────────────
+// DEBTS
+// ──────────────────────────────────────────────
 model Debt {
-  id           String   @id @default(uuid())
-  customerId   String
-  customer     Customer @relation(fields: [customerId], references: [id])
-  amountOwed   Float
-  saleId       String?
-  sale         Sale?    @relation(fields: [saleId], references: [id])
-  status       String   @default("PENDING") // PENDING, PAID
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id         String    @id @default(uuid())
+  customerId String
+  customer   Customer  @relation(fields: [customerId], references: [id])
+  amountOwed Float
+  saleId     String?
+  sale       Sale?     @relation(fields: [saleId], references: [id])
+  status     String    @default("PENDING") // PENDING | PAID
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 }
 
+// ──────────────────────────────────────────────
+// NOTIFICATIONS (now properly linked)
+// ──────────────────────────────────────────────
 model Notification {
-  id        String   @id @default(uuid())
-  type      String   // SYSTEM, PAYMENT, LOW_STOCK
-  message   String
-  read      Boolean  @default(false)
-  timestamp DateTime @default(now())
+  id          String     @id @default(uuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id])
+  type        String     // SYSTEM | PAYMENT | LOW_STOCK | STAFF_ACTIVITY
+  message     String
+  read        Boolean    @default(false)
+  timestamp   DateTime   @default(now())
+
+  @@index([userId])
+  @@index([workspaceId])
 }
 
+// ──────────────────────────────────────────────
+// GLOBAL CATALOGUE (shared barcode database)
+// ──────────────────────────────────────────────
+model CatalogueProduct {
+  barcode   String   @id
+  name      String
+  brand     String?
+  imageUrl  String?
+  category  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

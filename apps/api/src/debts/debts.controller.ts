@@ -9,11 +9,10 @@ import { Roles } from '../auth/roles.decorator';
 export class DebtsController {
     constructor(private readonly debtsService: DebtsService) {}
 
-    // Cashiers can record debts (credit sales) at checkout
-    @Roles('OWNER', 'MANAGER', 'CASHIER')
+    // Staff can record debts (credit sales) at checkout
+    @Roles('OWNER', 'MANAGER', 'STAFF')
     @Post()
     create(@Request() req: any, @Body() body: any) {
-        const storeOwnerId = req.user.storeOwnerId || req.user.sub;
-        return this.debtsService.create({ ...body, storeOwnerId });
+        return this.debtsService.create({ ...body, workspaceId: req.user.workspaceId });
     }
 }

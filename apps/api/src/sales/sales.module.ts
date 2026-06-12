@@ -3,9 +3,10 @@ import { SalesService } from './sales.service';
 import { SalesController } from './sales.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { RolesGuard } from '../auth/roles.guard';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, NotificationsModule],
   providers: [SalesService, RolesGuard],
   controllers: [SalesController],
 })

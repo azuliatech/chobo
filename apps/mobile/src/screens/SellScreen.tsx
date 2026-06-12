@@ -64,9 +64,12 @@ const ITEM_WIDTH = (width - 48 - 16) / 2; // 2 columns, 24px padding sides, 16px
 export const Header = ({ title, subtitle, showBell = true }: { title: string, subtitle?: string, showBell?: boolean }) => {
     const insets = useSafeAreaInsets();
     const { isOnline } = useSyncStore();
-    const { userId } = useAuthStore();
+    const { userId, activeStoreOwnerId, stores, setShowSubscriptionModal } = useAuthStore();
     const [unreadCount, setUnreadCount] = useState(0);
     const [sheetVisible, setSheetVisible] = useState(false);
+
+    const currentStore = stores.find(s => s.ownerId === activeStoreOwnerId);
+    const tier = currentStore?.tier || 'FREE';
 
     useEffect(() => {
         if (!showBell || !userId) return;
@@ -78,8 +81,19 @@ export const Header = ({ title, subtitle, showBell = true }: { title: string, su
     return (
         <View style={{ paddingTop: insets.top + 4 }} className="bg-white px-6 pb-2 border-b border-border flex-row items-center justify-between z-50">
             <View style={{ flex: 1, marginRight: 16 }}>
-                {/* TODO: Fetch store name from onboarding context */}
-                <Text className="text-textPrimary font-black text-xl" numberOfLines={1} ellipsizeMode="tail">{title}</Text>
+                <View className="flex-row items-center gap-2">
+                    <Text className="text-textPrimary font-black text-xl" numberOfLines={1} ellipsizeMode="tail" style={{ flexShrink: 1 }}>{title}</Text>
+                    {title === (currentStore?.shopName || 'KashAm') && (
+                        <TouchableOpacity 
+                            onPress={() => setShowSubscriptionModal(true)}
+                            className={`px-1.5 py-0.5 rounded pl-1 pr-1.5 flex-row items-center ${tier === 'PRO' ? 'bg-primary/20' : tier === 'ENTERPRISE' ? 'bg-purple-500/20' : 'bg-slate-200'}`}
+                        >
+                            <Text className={`text-[8px] font-black uppercase tracking-widest ${tier === 'PRO' ? 'text-primary' : tier === 'ENTERPRISE' ? 'text-purple-600' : 'text-slate-600'}`}>
+                                {tier}
+                            </Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
                 {subtitle && subtitle !== 'Offline ready' ? (
                      <Text className="text-textSecondary text-[10px] font-bold uppercase tracking-tight" numberOfLines={1} ellipsizeMode="tail">{subtitle}</Text>
                 ) : null}

@@ -10,7 +10,7 @@ export function buildHeaders(token: string, activeStoreOwnerId?: string | null):
         'Authorization': `Bearer ${token}`,
     };
     if (activeStoreOwnerId) {
-        headers['x-active-owner-id'] = activeStoreOwnerId;
+        headers['x-workspace-id'] = activeStoreOwnerId;
     }
     return headers;
 }

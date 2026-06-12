@@ -24,11 +24,17 @@
     "@nestjs/core": "^11.0.1",
     "@nestjs/jwt": "^11.0.2",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/throttler": "^6.5.0",
     "@prisma/adapter-pg": "^7.7.0",
     "@prisma/client": "^7.7.0",
     "bcrypt": "^6.0.0",
+    "expo-server-sdk": "^6.1.0",
+    "google-auth-library": "^10.7.0",
+    "helmet": "^8.2.0",
+    "ioredis": "^5.11.1",
     "pg": "^8.20.0",
     "reflect-metadata": "^0.2.2",
+    "resend": "^6.12.4",
     "rxjs": "^7.8.1"
   },
   "devDependencies": {

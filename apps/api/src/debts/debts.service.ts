@@ -1,11 +1,29 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class DebtsService {
     constructor(private prisma: PrismaService) {}
 
-    create(data: any) {
+    async create(data: any) {
+        // Verify customer belongs to this workspace
+        const customer = await this.prisma.customer.findFirst({
+            where: { id: data.customerId, workspaceId: data.workspaceId },
+        });
+        if (!customer) {
+            throw new BadRequestException('Customer does not belong to this workspace');
+        }
+
+        // Verify sale (if provided) belongs to this workspace
+        if (data.saleId) {
+            const sale = await this.prisma.sale.findFirst({
+                where: { id: data.saleId, workspaceId: data.workspaceId },
+            });
+            if (!sale) {
+                throw new BadRequestException('Sale does not belong to this workspace');
+            }
+        }
+
         return this.prisma.debt.upsert({
             where: { id: data.id },
             update: {

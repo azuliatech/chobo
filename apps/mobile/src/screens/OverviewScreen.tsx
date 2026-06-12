@@ -23,9 +23,9 @@ export default function OverviewScreen({ onNavigateToSell }: { onNavigateToSell?
     const [stats, setStats] = useState<any>(null);
     const [topProducts, setTopProducts] = useState<any[]>([]);
     const [refreshing, setRefreshing] = useState(false);
-    const { userId, activeRole } = useAuthStore();
+    const { userId, activeRole, setShowSubscriptionModal } = useAuthStore();
     const { formatAmount } = useCurrency();
-    const isCashier = activeRole === 'CASHIER';
+    const isCashier = activeRole === 'STAFF';
 
     const loadData = useCallback(async () => {
         if (!userId) return;
@@ -227,7 +227,7 @@ export default function OverviewScreen({ onNavigateToSell }: { onNavigateToSell?
                             <Text className="text-textSecondary font-bold text-xs leading-5 mb-4 z-10">
                                 Unlock predictive analytics to know exactly what to restock before you run out.
                             </Text>
-                            <TouchableOpacity className="bg-textPrimary py-3 rounded-xl items-center z-10 w-32 shadow-lg shadow-black/20">
+                            <TouchableOpacity onPress={() => setShowSubscriptionModal(true)} className="bg-textPrimary py-3 rounded-xl items-center z-10 w-32 shadow-lg shadow-black/20">
                                 <Text className="text-white font-black text-xs">Upgrade Plan</Text>
                             </TouchableOpacity>
                         </View>

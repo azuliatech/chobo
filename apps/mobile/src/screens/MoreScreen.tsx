@@ -16,7 +16,8 @@ import {
     Wrench,
     ArrowLeftRight,
     DoorOpen,
-    Users
+    Users,
+    Zap
 } from 'lucide-react-native';
 
 import PersonalInfoScreen from './PersonalInfoScreen';
@@ -45,12 +46,12 @@ const MenuItem = ({ icon: Icon, color, label, onPress, sublabel, danger }: any) 
 );
 
 export default function MoreScreen() {
-    const { logout, stores, activeStoreOwnerId, activeRole, userId, businessName } = useAuthStore();
+    const { logout, stores, activeStoreOwnerId, activeRole, userId, businessName, setShowSubscriptionModal } = useAuthStore();
     const { clearCart } = useCartStore();
     const [activeSubScreen, setActiveSubScreen] = useState<string | null>(null);
     const [showStoreSwitcher, setShowStoreSwitcher] = useState(false);
 
-    const isCashier = activeRole === 'CASHIER';
+    const isCashier = activeRole === 'STAFF';
     const isOwner = activeRole === 'OWNER';
     const hasMultipleStores = stores.length > 1;
 
@@ -163,6 +164,13 @@ export default function MoreScreen() {
                                 label="Staff Management" 
                                 sublabel="Add, view & remove your team"
                                 onPress={() => setActiveSubScreen('StaffManagement')} 
+                            />
+                            <MenuItem 
+                                icon={Zap} 
+                                color="#EAB308" 
+                                label="Subscription & Plan" 
+                                sublabel="Upgrade workspace to Pro"
+                                onPress={() => setShowSubscriptionModal(true)} 
                             />
                         </View>
                     </View>

@@ -9,43 +9,33 @@ import { Roles } from '../auth/roles.decorator';
 export class ProductsController {
     constructor(private readonly productsService: ProductsService) {}
 
-    // Cashiers can sync sales (decrement stock), managers/owners can add products
-    @Roles('OWNER', 'MANAGER', 'CASHIER')
+    @Roles('OWNER', 'MANAGER', 'STAFF')
     @Post('sync')
     syncUserProducts(@Request() req: any, @Body() products: any[]) {
-        const storeOwnerId = req.user.storeOwnerId || req.user.sub;
-        return this.productsService.syncUserProducts(storeOwnerId, products);
+        return this.productsService.syncUserProducts(req.user.workspaceId, products);
     }
 
-    // Cashiers can restore/view the product catalog to make sales
-    @Roles('OWNER', 'MANAGER', 'CASHIER')
+    @Roles('OWNER', 'MANAGER', 'STAFF')
     @Get('restore')
     restoreUserProducts(@Request() req: any) {
-        const storeOwnerId = req.user.storeOwnerId || req.user.sub;
-        return this.productsService.restoreUserProducts(storeOwnerId);
+        return this.productsService.restoreUserProducts(req.user.workspaceId);
     }
 
-    // Cashiers can view product list
-    @Roles('OWNER', 'MANAGER', 'CASHIER')
+    @Roles('OWNER', 'MANAGER', 'STAFF')
     @Get()
     findAll(@Request() req: any) {
-        const storeOwnerId = req.user.storeOwnerId || req.user.sub;
-        return this.productsService.findAll(storeOwnerId);
+        return this.productsService.findAll(req.user.workspaceId);
     }
 
-    // Only owner and manager can edit a product
     @Roles('OWNER', 'MANAGER')
     @Patch(':id')
     update(@Param('id') id: string, @Request() req: any, @Body() updateProductDto: any) {
-        const storeOwnerId = req.user.storeOwnerId || req.user.sub;
-        return this.productsService.update(id, storeOwnerId, updateProductDto);
+        return this.productsService.update(id, req.user.workspaceId, updateProductDto);
     }
 
-    // Only owner can delete a product
     @Roles('OWNER')
     @Delete(':id')
     remove(@Param('id') id: string, @Request() req: any) {
-        const storeOwnerId = req.user.storeOwnerId || req.user.sub;
-        return this.productsService.remove(id, storeOwnerId);
+        return this.productsService.remove(id, req.user.workspaceId);
     }
 }

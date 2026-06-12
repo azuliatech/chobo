@@ -23,13 +23,13 @@ interface Props {
 const ROLE_COLORS: Record<string, string> = {
     OWNER: '#7C5CFC',
     MANAGER: '#10B981',
-    CASHIER: '#F59E0B',
+    STAFF: '#F59E0B',
 };
 
 const ROLE_LABELS: Record<string, string> = {
     OWNER: 'Owner',
     MANAGER: 'Manager',
-    CASHIER: 'Cashier',
+    STAFF: 'Staff',
 };
 
 export function StoreSwitcherSheet({ visible, onClose, onSwitch }: Props) {

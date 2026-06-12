@@ -10,10 +10,9 @@ export class PaymentsController {
     constructor(private readonly paymentsService: PaymentsService) {}
 
     // All roles can record payments (bank transfers matched to sales)
-    @Roles('OWNER', 'MANAGER', 'CASHIER')
+    @Roles('OWNER', 'MANAGER', 'STAFF')
     @Post()
     create(@Request() req: any, @Body() body: any) {
-        const storeOwnerId = req.user.storeOwnerId || req.user.sub;
-        return this.paymentsService.create({ ...body, storeOwnerId });
+        return this.paymentsService.create({ ...body, workspaceId: req.user.workspaceId });
     }
 }

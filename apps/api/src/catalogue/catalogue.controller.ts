@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuthGuard } from '../auth/auth.guard';
 
 // Timeout fetch wrapper using AbortController
 async function fetchWithTimeout(url: string, options: any = {}, timeoutMs = 1500): Promise<Response> {
@@ -218,6 +219,7 @@ function normalizeCategory(rawCategory: string | null): string {
   return 'Provisions';
 }
 
+@UseGuards(AuthGuard)
 @Controller('catalogue')
 export class CatalogueController {
   constructor(private prisma: PrismaService) {}

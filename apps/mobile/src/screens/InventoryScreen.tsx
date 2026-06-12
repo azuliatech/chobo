@@ -98,7 +98,7 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
 
     const [permission, requestPermission] = useCameraPermissions();
     const { token, userId, activeRole } = useAuthStore();
-    const isCashier = activeRole === 'CASHIER';
+    const isCashier = activeRole === 'STAFF';
     const { isOnline } = useSyncStore();
     const { symbol, formatAmount } = useCurrency();
     const insets = useSafeAreaInsets();

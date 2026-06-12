@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, UseGuards, Request } from '@nestjs/common';
 import { SalesService } from './sales.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -9,19 +9,26 @@ import { Roles } from '../auth/roles.decorator';
 export class SalesController {
     constructor(private readonly salesService: SalesService) {}
 
-    // All roles can record sales
-    @Roles('OWNER', 'MANAGER', 'CASHIER')
+    @Roles('OWNER', 'MANAGER', 'STAFF')
     @Post('sync')
     syncData(@Request() req: any, @Body() body: any) {
-        const storeOwnerId = req.user.storeOwnerId || req.user.sub;
-        return this.salesService.syncData(body.changes, body.lastPulledAt, storeOwnerId);
+        return this.salesService.syncData(
+            body.changes,
+            body.lastPulledAt,
+            req.user.workspaceId,
+            req.user.sub, // staffId — who is making the sale
+        );
     }
 
-    // Only owner and manager can see daily revenue summary
     @Roles('OWNER', 'MANAGER')
     @Get('daily-summary')
     getDailySummary(@Request() req: any) {
-        const storeOwnerId = req.user.storeOwnerId || req.user.sub;
-        return this.salesService.getDailySummary(storeOwnerId);
+        return this.salesService.getDailySummary(req.user.workspaceId);
+    }
+
+    @Roles('OWNER', 'MANAGER')
+    @Get('analytics')
+    getAnalytics(@Request() req: any, @Query('days') days: string) {
+        return this.salesService.getAnalytics(req.user.workspaceId, days ? parseInt(days) : 7);
     }
 }

@@ -28,56 +28,47 @@ export class RolesGuard implements CanActivate {
 
         const request = context.switchToHttp().getRequest();
         const user = request['user']; // Populated by AuthGuard
-        const activeOwnerId = request.headers['x-active-owner-id'] as string;
+        const workspaceId = request.headers['x-workspace-id'] as string;
 
         if (!user) {
             throw new ForbiddenException('Unauthorized');
         }
 
-        // Case 1: User is acting as the owner of their own store
-        // (No x-active-owner-id header, or it matches their own ID)
-        if (!activeOwnerId || activeOwnerId === user.sub) {
-            // Grant OWNER-level access when operating on your own store
-            if (requiredRoles.includes('OWNER')) {
-                request['user'].storeOwnerId = user.sub;
-                request['user'].activeRole = 'OWNER';
-                return true;
-            }
-            // Even managers & cashiers need OWNER when on their own store
-            if (requiredRoles.includes('MANAGER') || requiredRoles.includes('CASHIER')) {
-                request['user'].storeOwnerId = user.sub;
-                request['user'].activeRole = 'OWNER';
-                return true;
-            }
-            throw new ForbiddenException('Insufficient permissions');
+        if (!workspaceId) {
+            throw new ForbiddenException('x-workspace-id header is required');
         }
 
-        // Case 2: User is operating on someone else's store — verify StaffLink
-        const link = await this.prisma.staffLink.findUnique({
+        // Verify the user is an active member of the requested workspace
+        const member = await this.prisma.workspaceMember.findUnique({
             where: {
-                userId_ownerId: {
+                workspaceId_userId: {
+                    workspaceId,
                     userId: user.sub,
-                    ownerId: activeOwnerId,
                 },
+            },
+            include: {
+                workspace: { select: { id: true, status: true } },
             },
         });
 
-        if (!link || link.status !== 'ACTIVE') {
-            throw new ForbiddenException(
-                'You are not an active staff member of this store',
-            );
+        if (!member || member.status !== 'ACTIVE') {
+            throw new ForbiddenException('You are not an active member of this workspace');
         }
 
-        // Check if the staff member's role satisfies the required roles
-        if (!requiredRoles.includes(link.role)) {
+        if (member.workspace.status !== 'ACTIVE') {
+            throw new ForbiddenException('This workspace is suspended');
+        }
+
+        // Check if the member's role satisfies the required roles
+        if (!requiredRoles.includes(member.role)) {
             throw new ForbiddenException(
-                `This action requires one of: [${requiredRoles.join(', ')}]. Your role is: ${link.role}`,
+                `This action requires one of: [${requiredRoles.join(', ')}]. Your role is: ${member.role}`,
             );
         }
 
         // Inject scoped context into request for downstream service use
-        request['user'].storeOwnerId = activeOwnerId;
-        request['user'].activeRole = link.role;
+        request['user'].workspaceId = workspaceId;
+        request['user'].activeRole = member.role;
         return true;
     }
 }

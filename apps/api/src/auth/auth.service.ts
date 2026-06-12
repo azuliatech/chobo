@@ -8,293 +8,366 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmailService } from './email.service';
 import * as bcrypt from 'bcrypt';
+import { randomBytes } from 'crypto';
+import { OAuth2Client } from 'google-auth-library';
 
-const REFRESH_SECRET =
-    process.env.JWT_REFRESH_SECRET ||
-    (process.env.NODE_ENV === 'production'
-        ? (() => {
-              throw new Error('JWT_REFRESH_SECRET must be defined in production!');
-          })()
-        : 'kasham-refresh-secret-key');
+const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+if (!REFRESH_SECRET) {
+    if (process.env.NODE_ENV === 'production') {
+        throw new Error('JWT_REFRESH_SECRET must be defined in production!');
+    }
+}
+const REFRESH_SECRET_RESOLVED = REFRESH_SECRET || 'dev-refresh-fallback-only';
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 @Injectable()
 export class AuthService {
     constructor(
         private prisma: PrismaService,
         private jwtService: JwtService,
+        private emailService: EmailService,
     ) {}
 
-    // ---- Token helpers ----
-    private async generateTokens(userId: string, phone: string) {
-        const payload = { sub: userId, phone };
+    // ── Token helpers ──────────────────────────────────────────────────────────
+    private async generateTokens(userId: string, email: string) {
+        const payload = { sub: userId, email };
         const [access_token, refresh_token] = await Promise.all([
             this.jwtService.signAsync(payload),
             this.jwtService.signAsync(payload, {
-                secret: REFRESH_SECRET,
+                secret: REFRESH_SECRET_RESOLVED,
                 expiresIn: '30d',
             }),
         ]);
         return { access_token, refresh_token };
     }
 
-    // ---- Build the list of stores a user has access to ----
-    private async getUserStores(userId: string) {
-        // 1. Their own store (if they are an OWNER with a shopName)
-        const self = await this.prisma.user.findUnique({ where: { id: userId } });
-
-        const stores: Array<{
-            ownerId: string;
-            shopName: string | null;
-            role: string;
-            status: string;
-        }> = [];
-
-        if (self?.shopName) {
-            stores.push({
-                ownerId: self.id,
-                shopName: self.shopName,
-                role: 'OWNER',
-                status: 'ACTIVE',
-            });
-        }
-
-        // 2. All stores they are staff at
-        const links = await this.prisma.staffLink.findMany({
+    // ── Workspace list helper ──────────────────────────────────────────────────
+    private async getUserWorkspaces(userId: string) {
+        const memberships = await this.prisma.workspaceMember.findMany({
             where: { userId, status: 'ACTIVE' },
-            include: { owner: { select: { id: true, shopName: true } } },
+            include: {
+                workspace: { select: { id: true, name: true, tier: true, status: true } },
+            },
         });
-
-        for (const link of links) {
-            stores.push({
-                ownerId: link.ownerId,
-                shopName: link.owner.shopName,
-                role: link.role,
-                status: link.status,
-            });
-        }
-
-        return stores;
-    }
-
-    // ---- Auth ----
-    async login(phone: string, pass: string) {
-        const user = await this.prisma.user.findUnique({ where: { phone } });
-        if (!user) throw new UnauthorizedException('Invalid credentials');
-        const isMatch = await bcrypt.compare(pass, user.password);
-        if (!isMatch) throw new UnauthorizedException('Invalid credentials');
-        const tokens = await this.generateTokens(user.id, user.phone);
-        const stores = await this.getUserStores(user.id);
-        return {
-            ...tokens,
-            user_id: user.id,
-            shop_name: user.shopName,
-            country_code: user.countryCode,
-            role: user.role,
-            stores,
-        };
+        return memberships.map((m) => ({
+            workspaceId: m.workspaceId,
+            name: m.workspace.name,
+            role: m.role,
+            tier: m.workspace.tier,
+            status: m.workspace.status,
+        }));
     }
 
     async register(
-        phone: string,
-        pass: string,
-        shopName?: string,
-        businessType?: string,
+        email: string,
+        password: string,
+        name?: string,
         countryCode?: string,
+        tosAccepted?: boolean,
+        businessName?: string,
+        businessType?: string,
     ) {
+        if (!tosAccepted) {
+            throw new BadRequestException('You must accept the Terms of Service to create an account');
+        }
+
+        const normalizedEmail = email.toLowerCase().trim();
+
+        const existing = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+        if (existing) throw new ConflictException('An account with this email already exists');
+
         const salt = await bcrypt.genSalt();
-        const hashedPassword = await bcrypt.hash(pass, salt);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
         const user = await this.prisma.user.create({
             data: {
-                phone,
+                email: normalizedEmail,
                 password: hashedPassword,
-                shopName,
-                businessType,
+                name,
                 countryCode: countryCode || 'NG',
-                role: 'OWNER',
+                tosAccepted: true,
+                emailVerified: false,
             },
         });
-        const tokens = await this.generateTokens(user.id, user.phone);
-        const stores = await this.getUserStores(user.id);
+
+        // Create default workspace for new registered user
+        await this.prisma.workspace.create({
+            data: {
+                name: businessName || `${name || 'My'}'s Store`,
+                businessType: businessType || 'Other',
+                countryCode: countryCode || 'NG',
+                ownerId: user.id,
+                tier: 'FREE',
+                status: 'ACTIVE',
+                members: {
+                    create: {
+                        userId: user.id,
+                        role: 'OWNER',
+                        status: 'ACTIVE',
+                    }
+                }
+            }
+        });
+
+        // Send verification email
+        const token = randomBytes(32).toString('hex');
+        await this.prisma.emailVerification.create({
+            data: {
+                email: normalizedEmail,
+                token,
+                type: 'VERIFY',
+                expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+            },
+        });
+        await this.emailService.sendVerificationEmail(normalizedEmail, name || null, token);
+
         return {
-            ...tokens,
+            message: 'Registration successful. Please check your email to verify your account.',
             user_id: user.id,
-            shop_name: user.shopName,
-            country_code: user.countryCode,
-            role: user.role,
-            stores,
+            email: user.email,
+            emailVerified: false,
         };
     }
 
+    // ── Email Verification ─────────────────────────────────────────────────────
+    async verifyEmail(token: string) {
+        const record = await this.prisma.emailVerification.findUnique({ where: { token } });
+
+        if (!record || record.used || record.type !== 'VERIFY') {
+            throw new BadRequestException('Verification link is invalid or has already been used');
+        }
+        if (new Date() > record.expiresAt) {
+            throw new BadRequestException('Verification link has expired. Please request a new one.');
+        }
+
+        await this.prisma.$transaction([
+            this.prisma.user.update({
+                where: { email: record.email },
+                data: { emailVerified: true },
+            }),
+            this.prisma.emailVerification.update({
+                where: { token },
+                data: { used: true },
+            }),
+        ]);
+
+        return { success: true, message: 'Email verified successfully. You can now log in.' };
+    }
+
+    // ── Resend Verification ────────────────────────────────────────────────────
+    async resendVerification(email: string) {
+        const normalizedEmail = email.toLowerCase().trim();
+        const user = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+        if (!user) throw new NotFoundException('No account found with this email');
+        if (user.emailVerified) throw new BadRequestException('This email is already verified');
+
+        // Invalidate all old tokens for this email
+        await this.prisma.emailVerification.updateMany({
+            where: { email: normalizedEmail, type: 'VERIFY', used: false },
+            data: { used: true },
+        });
+
+        const token = randomBytes(32).toString('hex');
+        await this.prisma.emailVerification.create({
+            data: {
+                email: normalizedEmail,
+                token,
+                type: 'VERIFY',
+                expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+            },
+        });
+        await this.emailService.sendVerificationEmail(normalizedEmail, user.name || null, token);
+
+        return { success: true, message: 'A new verification email has been sent' };
+    }
+
+    // ── Login ──────────────────────────────────────────────────────────────────
+    async login(email: string, password: string) {
+        const normalizedEmail = email.toLowerCase().trim();
+        const user = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+
+        if (!user || !user.password) throw new UnauthorizedException('Invalid email or password');
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) throw new UnauthorizedException('Invalid email or password');
+
+        if (!user.emailVerified) {
+            throw new ForbiddenException('Please verify your email before logging in. Check your inbox or request a new verification email.');
+        }
+
+        const tokens = await this.generateTokens(user.id, user.email);
+        const workspaces = await this.getUserWorkspaces(user.id);
+
+        return {
+            ...tokens,
+            user_id: user.id,
+            email: user.email,
+            name: user.name,
+            country_code: user.countryCode,
+            workspaces,
+        };
+    }
+
+    // ── Google OAuth ───────────────────────────────────────────────────────────
+    async googleAuth(idToken: string) {
+        let ticket: any;
+        try {
+            ticket = await googleClient.verifyIdToken({
+                idToken,
+                audience: process.env.GOOGLE_CLIENT_ID,
+            });
+        } catch {
+            throw new UnauthorizedException('Invalid Google token');
+        }
+
+        const payload = ticket.getPayload();
+        if (!payload?.email) throw new UnauthorizedException('Google token missing email');
+
+        const normalizedEmail = payload.email.toLowerCase();
+
+        // Find or create user
+        let user = await this.prisma.user.findFirst({
+            where: { OR: [{ googleId: payload.sub }, { email: normalizedEmail }] },
+        });
+
+        if (!user) {
+            user = await this.prisma.user.create({
+                data: {
+                    email: normalizedEmail,
+                    name: payload.name || null,
+                    googleId: payload.sub,
+                    emailVerified: true, // Google already verified their email
+                    tosAccepted: true,
+                    countryCode: 'NG',
+                },
+            });
+            // Create default workspace for new Google users
+            await this.prisma.workspace.create({
+                data: {
+                    name: `${payload.name || 'My'}'s Store`,
+                    businessType: 'Other',
+                    countryCode: 'NG',
+                    ownerId: user.id,
+                    tier: 'FREE',
+                    status: 'ACTIVE',
+                    members: {
+                        create: {
+                            userId: user.id,
+                            role: 'OWNER',
+                            status: 'ACTIVE',
+                        }
+                    }
+                }
+            });
+        } else if (!user.googleId) {
+            // Link existing account to Google
+            user = await this.prisma.user.update({
+                where: { id: user.id },
+                data: { googleId: payload.sub, emailVerified: true },
+            });
+        }
+
+        const tokens = await this.generateTokens(user.id, user.email);
+        const workspaces = await this.getUserWorkspaces(user.id);
+
+        return {
+            ...tokens,
+            user_id: user.id,
+            email: user.email,
+            name: user.name,
+            workspaces,
+        };
+    }
+
+    // ── Refresh Tokens ─────────────────────────────────────────────────────────
     async refreshTokens(refreshToken: string) {
         try {
             const payload = await this.jwtService.verifyAsync(refreshToken, {
-                secret: REFRESH_SECRET,
+                secret: REFRESH_SECRET_RESOLVED,
             });
             const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
             if (!user) throw new UnauthorizedException();
-            const tokens = await this.generateTokens(user.id, user.phone);
-            const stores = await this.getUserStores(user.id);
-            return { ...tokens, user_id: user.id, stores };
+
+            const tokens = await this.generateTokens(user.id, user.email);
+            const workspaces = await this.getUserWorkspaces(user.id);
+            return { ...tokens, user_id: user.id, workspaces };
         } catch {
             throw new UnauthorizedException('Invalid or expired refresh token');
         }
     }
 
-    // ---- Staff Management ----
+    // ── Forgot Password ────────────────────────────────────────────────────────
+    async forgotPassword(email: string) {
+        const normalizedEmail = email.toLowerCase().trim();
+        const user = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
 
-    /**
-     * Owner adds a new staff member by phone number.
-     * Creates a User account for them if they don't have one.
-     */
-    async addStaff(
-        ownerId: string,
-        phone: string,
-        role: 'MANAGER' | 'CASHIER',
-        name?: string,
-    ) {
-        if (!['MANAGER', 'CASHIER'].includes(role)) {
-            throw new BadRequestException('Role must be MANAGER or CASHIER');
-        }
+        // Always return success to prevent email enumeration attacks
+        if (!user) return { success: true, message: 'If an account exists, a reset link has been sent' };
 
-        // Clean phone number format
-        let cleanedPhone = phone.replace(/\s+/g, '').replace(/[+\-]/g, '');
-        if (cleanedPhone.startsWith('0')) {
-            cleanedPhone = '234' + cleanedPhone.slice(1);
-        }
-        // Ensure + prefix for storage consistency
-        const formattedPhone = `+${cleanedPhone}`;
+        // Invalidate old reset tokens
+        await this.prisma.emailVerification.updateMany({
+            where: { email: normalizedEmail, type: 'RESET_PASSWORD', used: false },
+            data: { used: true },
+        });
 
-        // Can't add yourself
-        const owner = await this.prisma.user.findUnique({ where: { id: ownerId } });
-        if (owner?.phone === formattedPhone) {
-            throw new BadRequestException('You cannot add yourself as a staff member');
-        }
-
-        // Find or create the staff user account
-        let staffUser = await this.prisma.user.findUnique({ where: { phone: formattedPhone } });
-
-        if (!staffUser) {
-            // Create a new account with a temporary password (phone number digits)
-            const tempPassword = cleanedPhone.slice(-6); // Last 6 digits of phone
-            const salt = await bcrypt.genSalt();
-            const hashedPassword = await bcrypt.hash(tempPassword, salt);
-            staffUser = await this.prisma.user.create({
-                data: {
-                    phone: formattedPhone,
-                    password: hashedPassword,
-                    shopName: name || null,
-                    role: 'CASHIER', // Their default role on their own account
-                    countryCode: 'NG',
-                },
-            });
-        }
-
-        // Create or update the StaffLink
-        try {
-            const link = await this.prisma.staffLink.upsert({
-                where: { userId_ownerId: { userId: staffUser.id, ownerId } },
-                update: { role, status: 'ACTIVE' },
-                create: { userId: staffUser.id, ownerId, role, status: 'ACTIVE' },
-                include: {
-                    user: { select: { id: true, phone: true, shopName: true } },
-                },
-            });
-            return {
-                success: true,
-                message: `Staff member added successfully`,
-                staffId: link.id,
-                userId: staffUser.id,
-                phone: staffUser.phone,
-                role,
-                isNewAccount: !staffUser.shopName, // hint: they may need to set a password
-            };
-        } catch (e: any) {
-            if (e.code === 'P2002') {
-                throw new ConflictException('This user is already a staff member of your store');
-            }
-            throw e;
-        }
-    }
-
-    /**
-     * Returns all active staff members for the owner's store.
-     */
-    async getStoreStaff(ownerId: string) {
-        const links = await this.prisma.staffLink.findMany({
-            where: { ownerId, status: 'ACTIVE' },
-            include: {
-                user: { select: { id: true, phone: true, shopName: true, role: true, createdAt: true } },
+        const token = randomBytes(32).toString('hex');
+        await this.prisma.emailVerification.create({
+            data: {
+                email: normalizedEmail,
+                token,
+                type: 'RESET_PASSWORD',
+                expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour
             },
-            orderBy: { createdAt: 'desc' },
         });
-        return links.map((l) => ({
-            linkId: l.id,
-            userId: l.userId,
-            phone: l.user.phone,
-            name: l.user.shopName,
-            role: l.role,
-            status: l.status,
-            joinedAt: l.createdAt,
-        }));
+        await this.emailService.sendPasswordResetEmail(normalizedEmail, user.name || null, token);
+
+        return { success: true, message: 'If an account exists, a reset link has been sent' };
     }
 
-    /**
-     * Owner removes a staff member by StaffLink ID.
-     */
-    async removeStaff(ownerId: string, linkId: string) {
-        const link = await this.prisma.staffLink.findFirst({
-            where: { id: linkId, ownerId },
-        });
-        if (!link) throw new NotFoundException('Staff link not found');
-        await this.prisma.staffLink.update({
-            where: { id: linkId },
-            data: { status: 'REMOVED' },
-        });
-        return { success: true, message: 'Staff member removed from your store' };
-    }
+    // ── Reset Password (token-based) ───────────────────────────────────────────
+    async resetPassword(token: string, newPassword: string) {
+        const record = await this.prisma.emailVerification.findUnique({ where: { token } });
 
-    /**
-     * Staff member self-exits from a store.
-     */
-    async leaveStore(userId: string, ownerId: string) {
-        const link = await this.prisma.staffLink.findUnique({
-            where: { userId_ownerId: { userId, ownerId } },
-        });
-        if (!link) throw new NotFoundException('You are not linked to this store');
-        await this.prisma.staffLink.delete({
-            where: { userId_ownerId: { userId, ownerId } },
-        });
-        return { success: true, message: 'You have successfully left this store' };
-    }
+        if (!record || record.used || record.type !== 'RESET_PASSWORD') {
+            throw new BadRequestException('Reset link is invalid or has already been used');
+        }
+        if (new Date() > record.expiresAt) {
+            throw new BadRequestException('Reset link has expired. Please request a new one.');
+        }
+        if (newPassword.length < 8) {
+            throw new BadRequestException('Password must be at least 8 characters');
+        }
 
-    /**
-     * Checks if a phone number is already registered in the database.
-     */
-    async checkPhoneRegistered(phone: string): Promise<boolean> {
-        const formatted = phone.startsWith('+') ? phone : `+${phone.replace(/\D/g, '')}`;
-        const user = await this.prisma.user.findUnique({ where: { phone: formatted } });
-        return !!user;
-    }
-
-    /**
-     * Resets the password of a user by phone number.
-     */
-    async resetPassword(phone: string, pass: string) {
-        const formatted = phone.startsWith('+') ? phone : `+${phone.replace(/\D/g, '')}`;
         const salt = await bcrypt.genSalt();
-        const hashedPassword = await bcrypt.hash(pass, salt);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        await this.prisma.$transaction([
+            this.prisma.user.update({
+                where: { email: record.email },
+                data: { password: hashedPassword },
+            }),
+            this.prisma.emailVerification.update({
+                where: { token },
+                data: { used: true },
+            }),
+        ]);
+
+        return { success: true, message: 'Password reset successful. You can now log in.' };
+    }
+
+    // ── Update Expo Push Token ─────────────────────────────────────────────────
+    async updatePushToken(userId: string, token: string) {
         await this.prisma.user.update({
-            where: { phone: formatted },
-            data: { password: hashedPassword },
+            where: { id: userId },
+            data: { expoPushToken: token },
         });
         return { success: true };
     }
 
-    /**
-     * Returns all stores a user has access to (own + staff links).
-     */
-    async getMyStores(userId: string) {
-        return this.getUserStores(userId);
+    // ── Get My Workspaces ──────────────────────────────────────────────────────
+    async getMyWorkspaces(userId: string) {
+        return this.getUserWorkspaces(userId);
     }
 }

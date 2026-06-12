@@ -24,7 +24,7 @@ function decodeJwtPayload(token: string): Record<string, any> | null {
 export interface StoreAccess {
     ownerId: string;
     shopName: string | null;
-    role: 'OWNER' | 'MANAGER' | 'CASHIER';
+    role: 'OWNER' | 'MANAGER' | 'STAFF';
     status: string;
 }
 
@@ -38,7 +38,10 @@ interface AuthState {
     // Multi-store state
     stores: StoreAccess[];
     activeStoreOwnerId: string | null; // The owner whose catalog is currently active
-    activeRole: 'OWNER' | 'MANAGER' | 'CASHIER' | null;
+    activeRole: 'OWNER' | 'MANAGER' | 'STAFF' | null;
+
+    showSubscriptionModal: boolean;
+    setShowSubscriptionModal: (show: boolean) => void;
 
     login: (
         token: string,
@@ -62,6 +65,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     stores: [],
     activeStoreOwnerId: null,
     activeRole: null,
+    showSubscriptionModal: false,
+
+    setShowSubscriptionModal: (show) => set({ showSubscriptionModal: show }),
 
     login: async (token, refreshToken, userId, businessName, stores = []) => {
         try {
@@ -141,7 +147,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                 isReady: true,
                 // Restore active store context (stores[] will be re-fetched on next login)
                 activeStoreOwnerId: activeStoreOwnerId || resolvedUserId,
-                activeRole: (activeRole as 'OWNER' | 'MANAGER' | 'CASHIER') || 'OWNER',
+                activeRole: (activeRole as 'OWNER' | 'MANAGER' | 'STAFF') || 'OWNER',
             });
         } catch (e) {
             console.error('Failed to restore auth state', e);
