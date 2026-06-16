@@ -9,10 +9,20 @@
       "distribution": "internal"
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://kasham-api-staging.onrender.com/api/v1",
+        "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "dz1wzvee5",
+        "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "kasham_uploads"
+      }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://kasham-api-production.onrender.com/api/v1",
+        "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "dz1wzvee5",
+        "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "kasham_uploads"
+      }
     }
   },
   "submit": {

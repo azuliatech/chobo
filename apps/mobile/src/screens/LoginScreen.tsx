@@ -102,11 +102,14 @@ export default function LoginScreen() {
         }
 
         setLoading(true);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 60000); // 60s for cold start
         try {
             const res = await fetch(`${API_URL}/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: email.toLowerCase().trim(), password })
+                body: JSON.stringify({ email: email.toLowerCase().trim(), password }),
+                signal: controller.signal,
             });
             const data = await res.json();
             
@@ -127,9 +130,14 @@ export default function LoginScreen() {
             } else {
                 setLoginError(data.message || 'Invalid email or password');
             }
-        } catch (e) {
-            setLoginError('Could not reach the server. Please check your connection.');
+        } catch (e: any) {
+            if (e?.name === 'AbortError') {
+                setLoginError('Server is waking up — please try again in a moment.');
+            } else {
+                setLoginError('Could not reach the server. Please check your connection.');
+            }
         } finally {
+            clearTimeout(timeout);
             setLoading(false);
         }
     };
@@ -157,6 +165,8 @@ export default function LoginScreen() {
         }
 
         setLoading(true);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 60000);
         try {
             const res = await fetch(`${API_URL}/auth/register`, {
                 method: 'POST',
@@ -169,7 +179,8 @@ export default function LoginScreen() {
                     business_type: finalType,
                     country_code: countryCode,
                     tos_accepted: tosAccepted
-                })
+                }),
+                signal: controller.signal,
             });
             const data = await res.json();
             
@@ -180,9 +191,14 @@ export default function LoginScreen() {
             } else {
                 setSignupError(data.message || 'Registration failed');
             }
-        } catch (e) {
-            setSignupError('Could not reach the server. Please check your connection.');
+        } catch (e: any) {
+            if (e?.name === 'AbortError') {
+                setSignupError('Server is waking up — please try again in a moment.');
+            } else {
+                setSignupError('Could not reach the server. Please check your connection.');
+            }
         } finally {
+            clearTimeout(timeout);
             setLoading(false);
         }
     };
@@ -190,11 +206,14 @@ export default function LoginScreen() {
     // ── Resend Verification Email ─────────────────────────────────────────────
     const handleResendVerification = async () => {
         setResendStatus('');
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 60000);
         try {
             const res = await fetch(`${API_URL}/auth/resend-verification`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: verifyEmailAddress })
+                body: JSON.stringify({ email: verifyEmailAddress }),
+                signal: controller.signal,
             });
             const data = await res.json();
             if (res.ok) {
@@ -202,8 +221,14 @@ export default function LoginScreen() {
             } else {
                 setResendStatus(data.message || 'Failed to resend verification email.');
             }
-        } catch (e) {
-            setResendStatus('Could not reach the server. Check your connection.');
+        } catch (e: any) {
+            if (e?.name === 'AbortError') {
+                setResendStatus('Server is waking up — please try again in a moment.');
+            } else {
+                setResendStatus('Could not reach the server. Check your connection.');
+            }
+        } finally {
+            clearTimeout(timeout);
         }
     };
 
@@ -216,11 +241,14 @@ export default function LoginScreen() {
         }
 
         setForgotLoading(true);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 60000);
         try {
             const res = await fetch(`${API_URL}/auth/forgot-password`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: forgotEmail.toLowerCase().trim() })
+                body: JSON.stringify({ email: forgotEmail.toLowerCase().trim() }),
+                signal: controller.signal,
             });
             const data = await res.json();
             if (res.ok) {
@@ -230,9 +258,14 @@ export default function LoginScreen() {
             } else {
                 setForgotError(data.message || 'Failed to send reset link');
             }
-        } catch (e) {
-            setForgotError('Could not reach the server. Check your connection.');
+        } catch (e: any) {
+            if (e?.name === 'AbortError') {
+                setForgotError('Server is waking up — please try again in a moment.');
+            } else {
+                setForgotError('Could not reach the server. Check your connection.');
+            }
         } finally {
+            clearTimeout(timeout);
             setForgotLoading(false);
         }
     };
