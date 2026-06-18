@@ -11,9 +11,7 @@ import {
     Wallet, 
     Receipt, 
     ArrowUpRight, 
-    Package,
-    Lock,
-    Sparkles
+    Package
 } from 'lucide-react-native';
 
 type TimeFilter = 'today' | 'week' | 'month';
@@ -212,25 +210,6 @@ export default function OverviewScreen({ onNavigateToSell }: { onNavigateToSell?
                             ))}
                         </View>
 
-                        {/* AI INSIGHT BANNER (LOCKED) */}
-                        <View className="bg-gradient-to-r from-accent/20 to-primary/20 p-6 rounded-[32px] border border-accent/30 relative overflow-hidden">
-                            <View className="flex-row items-start justify-between mb-2 z-10">
-                                <View className="flex-row items-center bg-white/50 px-2 py-1 rounded-full border border-white">
-                                    <Sparkles size={12} color="#92400E" />
-                                    <Text className="text-[#92400E] font-black text-[9px] uppercase ml-1 tracking-widest">KashAm AI</Text>
-                                </View>
-                                <View className="bg-textPrimary p-2 rounded-full">
-                                    <Lock size={14} color="white" />
-                                </View>
-                            </View>
-                            <Text className="text-textPrimary font-black text-xl mb-2 z-10">Smart Restock Insights</Text>
-                            <Text className="text-textSecondary font-bold text-xs leading-5 mb-4 z-10">
-                                Unlock predictive analytics to know exactly what to restock before you run out.
-                            </Text>
-                            <TouchableOpacity onPress={() => setShowSubscriptionModal(true)} className="bg-textPrimary py-3 rounded-xl items-center z-10 w-32 shadow-lg shadow-black/20">
-                                <Text className="text-white font-black text-xs">Upgrade Plan</Text>
-                            </TouchableOpacity>
-                        </View>
                     </>
                 )}
 

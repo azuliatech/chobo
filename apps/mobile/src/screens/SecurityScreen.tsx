@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, TextInput, ScrollView } from 'react-native';
-import { ArrowLeft, Lock, Smartphone, ShieldCheck } from 'lucide-react-native';
+import { ArrowLeft, Lock } from 'lucide-react-native';
 
 export default function SecurityScreen({ onBack }: { onBack: () => void }) {
     const [currentPass, setCurrentPass] = useState('');
@@ -49,32 +49,6 @@ export default function SecurityScreen({ onBack }: { onBack: () => void }) {
                         <Text className="text-white font-black">Update Password</Text>
                     </TouchableOpacity>
                 </View>
-
-                <View className="bg-white rounded-3xl p-6 border border-border shadow-sm mb-6">
-                    <View className="flex-row items-center mb-6">
-                        <Smartphone size={20} color="#0F172A" />
-                        <Text className="font-black text-textPrimary ml-3 text-lg">Change Phone Number</Text>
-                    </View>
-                    <View className="mb-6">
-                        <Text className="text-textSecondary text-[10px] font-black uppercase mb-2">New Phone Number</Text>
-                        <View className="flex-row items-center bg-lightBackground border border-border rounded-xl px-4 h-14">
-                            <TextInput placeholderTextColor="#94A3B8" 
-                                className="flex-1 font-bold text-textPrimary" 
-                                placeholder="e.g. 801 234 5678"
-                                keyboardType="phone-pad"
-                            />
-                        </View>
-                    </View>
-                    <TouchableOpacity className="py-4 rounded-xl items-center bg-black">
-                        <Text className="text-white font-black">Request OTP</Text>
-                    </TouchableOpacity>
-                </View>
-
-                <View className="flex-row items-start bg-lightGreen p-4 rounded-2xl mb-8 border border-primary/20">
-                    <ShieldCheck size={20} color="#16A34A" />
-                    <Text className="flex-1 ml-3 text-xs text-[#15803D] font-bold leading-5">Your data is fully encrypted and stored securely both locally and on our cloud servers.</Text>
-                </View>
-
             </ScrollView>
         </View>
     );

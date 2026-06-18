@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert, TextInput } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, TextInput } from 'react-native';
 import { ArrowLeft, Store, MapPin, ChevronRight, Package, LocateFixed, Banknote } from 'lucide-react-native';
+import AppModal from '../components/AppModal';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '../store/authStore';
 import { useCurrency } from '../hooks/useCurrency';
+import { API_URL } from '../config';
 
 const BUSINESS_TYPES = [
     'Provision Store',
@@ -28,6 +30,7 @@ export default function BusinessSettingsScreen({ onBack }: { onBack: () => void 
     const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const [locating, setLocating] = useState(false);
+    const [modal, setModal] = useState<{ visible: boolean; type: 'success' | 'error' | 'warning' | 'info'; title: string; subtitle?: string; primaryLabel?: string; onPrimary?: () => void; secondaryLabel?: string; onSecondary?: () => void; autoDismiss?: boolean } | null>(null);
 
     useEffect(() => {
         loadSettings();
@@ -45,6 +48,30 @@ export default function BusinessSettingsScreen({ onBack }: { onBack: () => void 
             if (storedOtherType) setOtherType(storedOtherType);
             if (storedLocation) setLocation(storedLocation);
             if (storedLowStock) setLowStock(storedLowStock);
+
+            const currentName = useAuthStore.getState().businessName;
+            if (!currentName) {
+                const workspaceId = useAuthStore.getState().activeStoreOwnerId;
+                const token = useAuthStore.getState().token;
+                if (workspaceId && token) {
+                    const res = await fetch(`${API_URL}/workspaces/${workspaceId}`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                    });
+                    if (res.ok) {
+                        const workspace = await res.json();
+                        useAuthStore.getState().setBusinessName(workspace.name);
+                        setName(workspace.name);
+                        if (workspace.businessType) {
+                            setBusinessType(workspace.businessType);
+                            await AsyncStorage.setItem('businessType', workspace.businessType);
+                        }
+                        if (workspace.location) {
+                            setLocation(workspace.location);
+                            await AsyncStorage.setItem('businessLocation', workspace.location);
+                        }
+                    }
+                }
+            }
         } catch (e) {
             console.error('Failed to load business settings', e);
         }
@@ -53,43 +80,101 @@ export default function BusinessSettingsScreen({ onBack }: { onBack: () => void 
     const handleSave = async () => {
         setLoading(true);
         try {
+            const workspaceId = useAuthStore.getState().activeStoreOwnerId;
+            const token = useAuthStore.getState().token;
+
+            if (workspaceId && token) {
+                const res = await fetch(`${API_URL}/workspaces/${workspaceId}`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({
+                        name,
+                        businessType: businessType === 'Other' ? otherType : businessType,
+                        location,
+                    }),
+                });
+                if (!res.ok) throw new Error('Failed to update workspace');
+            }
+
             await setStoreBusinessName(name);
             await AsyncStorage.setItem('businessType', businessType);
             await AsyncStorage.setItem('businessOtherType', otherType);
             await AsyncStorage.setItem('businessLocation', location);
             await AsyncStorage.setItem('lowStockThreshold', lowStock);
-            Alert.alert('Success', 'Business settings saved successfully!');
+            setModal({
+                visible: true,
+                type: 'success',
+                title: 'Saved',
+                subtitle: 'Business settings updated successfully',
+                autoDismiss: true,
+            });
         } catch (e) {
-            Alert.alert('Error', 'Could not save business settings');
+            setModal({
+                visible: true,
+                type: 'error',
+                title: 'Save failed',
+                subtitle: 'Could not save settings. Please try again.',
+            });
         } finally {
             setLoading(false);
         }
     };
 
+    // TODO: Replace ipapi.co with Google Places Autocomplete when API key is available
     const handleGetLocation = async () => {
         setLocating(true);
         try {
-            let { status } = await Location.requestForegroundPermissionsAsync();
-            if (status !== 'granted') {
-                Alert.alert('Permission Denied', 'Permission to access location was denied');
-                return;
-            }
-
-            let loc = await Location.getCurrentPositionAsync({});
-            let geocode = await Location.reverseGeocodeAsync({
-                latitude: loc.coords.latitude,
-                longitude: loc.coords.longitude
-            });
-            
-            if (geocode.length > 0) {
-                const place = geocode[0];
-                const locStr = `${place.city || place.subregion || ''}, ${place.country || ''}`.replace(/^, /, '');
-                setLocation(locStr);
+            const { status } = await Location.requestForegroundPermissionsAsync();
+            if (status === 'granted') {
+                const loc = await Location.getCurrentPositionAsync({});
+                const geocode = await Location.reverseGeocodeAsync({
+                    latitude: loc.coords.latitude,
+                    longitude: loc.coords.longitude
+                });
+                if (geocode.length > 0) {
+                    const address = geocode[0];
+                    const formatted = [address.street, address.city, address.region, address.country]
+                        .filter(Boolean)
+                        .join(', ');
+                    setLocation(formatted);
+                } else {
+                    setLocation(`${loc.coords.latitude.toFixed(4)}, ${loc.coords.longitude.toFixed(4)}`);
+                }
             } else {
-                setLocation(`${loc.coords.latitude.toFixed(4)}, ${loc.coords.longitude.toFixed(4)}`);
+                try {
+                    const ipRes = await fetch('https://ipapi.co/json/');
+                    const ipData = await ipRes.json();
+                    const formatted = [ipData.city, ipData.region, ipData.country_name]
+                        .filter(Boolean)
+                        .join(', ');
+                    setLocation(formatted);
+                    setModal({
+                        visible: true,
+                        type: 'info',
+                        title: 'Location estimated',
+                        subtitle: 'GPS was not available. Location set from your IP address. You can edit it manually.',
+                        autoDismiss: true,
+                    });
+                } catch {
+                    setModal({
+                        visible: true,
+                        type: 'error',
+                        title: 'Location unavailable',
+                        subtitle: 'Could not detect your location. Please enter it manually.',
+                    });
+                }
             }
         } catch (e) {
-            Alert.alert('Location Error', 'Could not fetch your location.');
+            console.error('Location error:', e);
+            setModal({
+                visible: true,
+                type: 'error',
+                title: 'Location Error',
+                subtitle: 'Could not fetch your location.',
+            });
         } finally {
             setLocating(false);
         }
@@ -209,6 +294,18 @@ export default function BusinessSettingsScreen({ onBack }: { onBack: () => void 
                     </TouchableOpacity>
                 )}
             </ScrollView>
+            <AppModal
+                visible={modal?.visible ?? false}
+                type={modal?.type ?? 'info'}
+                title={modal?.title ?? ''}
+                subtitle={modal?.subtitle}
+                primaryLabel={modal?.primaryLabel}
+                onPrimary={() => { modal?.onPrimary?.(); setModal(null); }}
+                secondaryLabel={modal?.secondaryLabel}
+                onSecondary={() => { modal?.onSecondary?.(); setModal(null); }}
+                onDismiss={() => setModal(null)}
+                autoDismiss={modal?.autoDismiss}
+            />
         </View>
     );
 }

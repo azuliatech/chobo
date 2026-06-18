@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
     View, Text, Modal, TextInput, TouchableOpacity,
-    Alert, Image, ActivityIndicator, ActionSheetIOS, Platform, ScrollView
+    Image, ActivityIndicator, ActionSheetIOS, Platform, ScrollView
 } from 'react-native';
+import AppModal from './AppModal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, ScanLine, Camera } from 'lucide-react-native';
 import { createProduct } from '../db';
@@ -43,6 +44,7 @@ export default function AddProductSheet({ visible, onClose, onSuccess, initialBa
     const [localImageUri, setLocalImageUri] = useState<string | null>(null);
     const [uploading, setUploading] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [modal, setModal] = useState<{ visible: boolean; type: 'success' | 'error' | 'warning' | 'info'; title: string; subtitle?: string; primaryLabel?: string; onPrimary?: () => void; secondaryLabel?: string; onSecondary?: () => void; autoDismiss?: boolean } | null>(null);
 
     // Category states
     const [category, setCategory] = useState('Provisions');
@@ -104,11 +106,16 @@ export default function AddProductSheet({ visible, onClose, onSuccess, initialBa
                 }
             );
         } else {
-            Alert.alert('Add Photo', 'Choose an option', [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Take Photo', onPress: async () => { const uri = await takePhoto(); if (uri) setLocalImageUri(uri); } },
-                { text: 'Choose from Gallery', onPress: async () => { const uri = await pickImageFromGallery(); if (uri) setLocalImageUri(uri); } },
-            ]);
+            setModal({
+                visible: true,
+                type: 'info',
+                title: 'Add Photo',
+                subtitle: 'Choose an option',
+                primaryLabel: 'Take Photo',
+                onPrimary: async () => { const uri = await takePhoto(); if (uri) setLocalImageUri(uri); },
+                secondaryLabel: 'Choose from Gallery',
+                onSecondary: async () => { const uri = await pickImageFromGallery(); if (uri) setLocalImageUri(uri); },
+            });
         }
     };
 
@@ -151,7 +158,12 @@ export default function AddProductSheet({ visible, onClose, onSuccess, initialBa
             if (localImageUri) {
                 if (!isOnline) {
                     if (!localImageUri.startsWith('http')) {
-                        Alert.alert('Offline', "You're offline — the image will not be uploaded.");
+                        setModal({
+                        visible: true,
+                        type: 'info',
+                        title: 'Offline',
+                        subtitle: "You're offline — the image will not be uploaded.",
+                    });
                     } else {
                         imageUrl = localImageUri;
                     }
@@ -186,9 +198,19 @@ export default function AddProductSheet({ visible, onClose, onSuccess, initialBa
             onClose();
         } catch (e: any) {
             if (e.message?.includes('UNIQUE')) {
-                Alert.alert('Error', 'A product with this barcode already exists.');
+                setModal({
+                    visible: true,
+                    type: 'error',
+                    title: 'Error',
+                    subtitle: 'A product with this barcode already exists.',
+                });
             } else {
-                Alert.alert('Error', 'Could not save product');
+                setModal({
+                    visible: true,
+                    type: 'error',
+                    title: 'Error',
+                    subtitle: 'Could not save product',
+                });
             }
         } finally {
             setSaving(false); setUploading(false);
@@ -326,6 +348,18 @@ export default function AddProductSheet({ visible, onClose, onSuccess, initialBa
                     </ScrollView>
                 </View>
             </View>
+            <AppModal
+                visible={modal?.visible ?? false}
+                type={modal?.type ?? 'info'}
+                title={modal?.title ?? ''}
+                subtitle={modal?.subtitle}
+                primaryLabel={modal?.primaryLabel}
+                onPrimary={() => { modal?.onPrimary?.(); setModal(null); }}
+                secondaryLabel={modal?.secondaryLabel}
+                onSecondary={() => { modal?.onSecondary?.(); setModal(null); }}
+                onDismiss={() => setModal(null)}
+                autoDismiss={modal?.autoDismiss}
+            />
         </Modal>
     );
 }

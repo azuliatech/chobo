@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     View, Text, TouchableOpacity, Modal, Image, TextInput, ScrollView,
-    Platform, UIManager, Alert, Dimensions, ActivityIndicator, Share, KeyboardAvoidingView, Vibration
+    Platform, UIManager, Dimensions, ActivityIndicator, Share, KeyboardAvoidingView, Vibration
 } from 'react-native';
 import { Audio } from 'expo-av';
+import * as Haptics from 'expo-haptics';
 import {
     getProducts, 
     createSale, 
@@ -14,8 +15,10 @@ import {
     getFrequentlySoldProducts,
     getNotifications,
     createNotification,
-    notificationExistsForRelated
+    notificationExistsForRelated,
+    createProduct
 } from '../db';
+import AppModal from '../components/AppModal';
 import { useAuthStore } from '../store/authStore';
 import { useCurrency } from '../hooks/useCurrency';
 import { useCartStore, PaymentType } from '../store/cartStore';
@@ -142,6 +145,18 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
     const [miniProductName, setMiniProductName] = useState('');
     const [miniProductPrice, setMiniProductPrice] = useState('');
     
+    // Custom AppModal State
+    const [modalConfig, setModalConfig] = useState<{
+        visible: boolean;
+        type: 'success' | 'error' | 'warning' | 'info';
+        title: string;
+        subtitle?: string;
+    }>({
+        visible: false,
+        type: 'info',
+        title: '',
+    });
+    
     // Checkout State
     const [checkoutVisible, setCheckoutVisible] = useState(false);
     const [successVisible, setSuccessVisible] = useState(false);
@@ -211,20 +226,36 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
             if (userId) {
                 await SecureStore.setItemAsync('biometricUserId', userId);
             }
-            Alert.alert('Success', 'Biometric login enabled!');
+            setModalConfig({
+                visible: true,
+                type: 'success',
+                title: 'Success',
+                subtitle: 'Biometric login enabled!',
+            });
+            await SecureStore.setItemAsync('hasPromptedBiometric', 'true');
+            setBiometricPromptVisible(false);
         }
         await SecureStore.setItemAsync('hasPromptedBiometric', 'true');
         setBiometricPromptVisible(false);
     };
 
-    const handleDeclineBiometric = async () => {
-        await SecureStore.setItemAsync('hasPromptedBiometric', 'true');
-        setBiometricPromptVisible(false);
-    };
-
     const handleProductPress = (product: any) => {
+        const cartItem = items.find(i => i.productId === product.id);
+        const inCartQty = cartItem ? cartItem.quantity : 0;
+        const remainingStock = product.stock - inCartQty;
+
+        if (remainingStock <= 0) {
+            setModalConfig({
+                visible: true,
+                type: 'warning',
+                title: 'Out of Stock',
+                subtitle: `Product "${product.name}" is currently out of stock. Please restock it.`,
+            });
+            return;
+        }
+
         // Haptic vibration feedback on product tap
-        Vibration.vibrate(30);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
         addItem(product);
     };
 
@@ -232,6 +263,17 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
         const item = items.find(i => i.productId === productId);
         if (!item) return;
         
+        const product = products.find(p => p.id === productId);
+        if (product && delta > 0 && item.quantity >= product.stock) {
+            setModalConfig({
+                visible: true,
+                type: 'warning',
+                title: 'Stock Limit Reached',
+                subtitle: `Cannot add more "${product.name}". Only ${product.stock} items are in stock.`,
+            });
+            return;
+        }
+
         const newQty = item.quantity + delta;
         updateQuantity(productId, newQty);
     };
@@ -251,6 +293,20 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
 
         const match = products.find(p => p.barcode && p.barcode.trim() === data.trim());
         if (match) {
+            const cartItem = items.find(i => i.productId === match.id);
+            const inCartQty = cartItem ? cartItem.quantity : 0;
+            const remainingStock = match.stock - inCartQty;
+
+            if (remainingStock <= 0) {
+                setScannerVisible(false);
+                setModalConfig({
+                    visible: true,
+                    type: 'warning',
+                    title: 'Out of Stock',
+                    subtitle: `Scanned product "${match.name}" is out of stock.`,
+                });
+                return;
+            }
             handleProductPress(match);
             // Play ping sound on successful scan
             (async () => {
@@ -323,7 +379,12 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
             loadData();
         } catch (e) {
             console.warn('Mini save failed', e);
-            Alert.alert('Error', 'Could not quick-add product');
+            setModalConfig({
+                visible: true,
+                type: 'error',
+                title: 'Error',
+                subtitle: 'Could not quick-add product',
+            });
         }
     };
 
@@ -332,7 +393,15 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
             setCustomerNameError('Customer name is required for Pay Later sales');
             return;
         }
-        if (!userId) { Alert.alert('Error', 'Not logged in'); return; }
+        if (!userId) {
+            setModalConfig({
+                visible: true,
+                type: 'error',
+                title: 'Error',
+                subtitle: 'Not logged in',
+            });
+            return;
+        }
 
         try {
             setSaleLoading(true);
@@ -388,7 +457,12 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
             }
         } catch (e) {
             console.error('Sale error', e);
-            Alert.alert('Error', 'Could not record sale');
+            setModalConfig({
+                visible: true,
+                type: 'error',
+                title: 'Error',
+                subtitle: 'Could not record sale',
+            });
         } finally {
             setSaleLoading(false);
         }
@@ -419,7 +493,14 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
             <TouchableOpacity 
                 onPress={() => handleProductPress(item)}
                 style={{ width: ITEM_WIDTH }}
-                className={`bg-white rounded-2xl p-4 mb-4 ${isSelected ? 'border-2 border-primary bg-primaryLight/30' : 'border border-border'}`}
+                className={`rounded-2xl p-4 mb-4 ${
+                    isOutOfStock 
+                        ? 'bg-slate-100 border border-slate-200 opacity-60' 
+                        : isSelected 
+                            ? 'bg-primaryLight/30 border-2 border-primary' 
+                            : 'bg-white border border-border'
+                }`}
+                activeOpacity={isOutOfStock ? 1 : 0.7}
             >
                 {isSelected && (
                     <View className="absolute -top-2 -right-2 bg-primary min-w-[24px] h-[24px] rounded-full items-center justify-center z-10 border-2 border-white px-1">
@@ -429,15 +510,15 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
 
                 <View className="w-full aspect-square rounded-2xl overflow-hidden mb-3 bg-lightBackground">
                     {item.image_uri ? (
-                        <Image source={{ uri: item.image_uri }} className="w-full h-full" resizeMode="cover" />
+                        <Image source={{ uri: item.image_uri }} className={`w-full h-full ${isOutOfStock ? 'grayscale' : ''}`} resizeMode="cover" />
                     ) : (
-                        <View className="w-full h-full items-center justify-center bg-primaryLight">
-                            <Text className="text-primaryDark font-bold text-xl">{getInitials(item.name)}</Text>
+                        <View className={`w-full h-full items-center justify-center ${isOutOfStock ? 'bg-slate-200' : 'bg-primaryLight'}`}>
+                            <Text className={`${isOutOfStock ? 'text-slate-400' : 'text-primaryDark'} font-bold text-xl`}>{getInitials(item.name)}</Text>
                         </View>
                     )}
                 </View>
-                <Text className="font-bold text-sm text-textPrimary text-center mb-1" numberOfLines={2}>{item.name}</Text>
-                <Text className="text-primary font-black text-base text-center mb-2">{formatAmount(item.price)}</Text>
+                <Text className={`font-bold text-sm text-center mb-1 ${isOutOfStock ? 'text-slate-400' : 'text-textPrimary'}`} numberOfLines={2}>{item.name}</Text>
+                <Text className={`font-black text-base text-center mb-2 ${isOutOfStock ? 'text-slate-400' : 'text-primary'}`}>{formatAmount(item.price)}</Text>
                 
                 <View className="flex-row items-center justify-center gap-1.5 mt-auto">
                     <View className="w-2 h-2 rounded-full" style={{ backgroundColor: dotColor }} />
@@ -538,7 +619,7 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
                         </Text>
                         <View className="flex-row gap-4">
                             <TouchableOpacity 
-                                onPress={() => setScannerVisible(true)}
+                                onPress={() => onNavigateToStock?.('')}
                                 className="flex-1 bg-primary py-3.5 rounded-xl items-center flex-row justify-center shadow-sm active:bg-[#15803D]"
                             >
                                 <ScanLine size={16} color="white" style={{ marginRight: 8 }} />
@@ -701,7 +782,10 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
             {/* MINI ADD SHEET */}
             <Modal visible={showMiniAddSheet} transparent animationType="slide">
                 <View className="flex-1 bg-black/60 justify-end">
-                    <View className="bg-white rounded-t-[40px] p-6 pb-12">
+                    <KeyboardAvoidingView
+                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                        className="bg-white rounded-t-[40px] p-6 pb-12"
+                    >
                         <View className="w-12 h-1.5 bg-border rounded-full self-center mb-6" />
                         <Text className="text-xl font-black text-textPrimary mb-6">Quick Add Product</Text>
                         
@@ -746,9 +830,17 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
                         >
                             <Text className="text-textSecondary font-bold">Cancel</Text>
                         </TouchableOpacity>
-                    </View>
+                    </KeyboardAvoidingView>
                 </View>
             </Modal>
+
+            <AppModal
+                visible={modalConfig.visible}
+                type={modalConfig.type}
+                title={modalConfig.title}
+                subtitle={modalConfig.subtitle}
+                onDismiss={() => setModalConfig(prev => ({ ...prev, visible: false }))}
+            />
 
             {/* ADD PRODUCT SHEET (Overlay) */}
             <AddProductSheet 

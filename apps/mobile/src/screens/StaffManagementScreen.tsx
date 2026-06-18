@@ -5,7 +5,6 @@ import {
     TouchableOpacity,
     FlatList,
     TextInput,
-    Alert,
     ActivityIndicator,
     Modal,
     ScrollView,
@@ -18,10 +17,13 @@ import {
     ChevronRight,
     X,
     Mail,
+    Send,
 } from 'lucide-react-native';
 import { useAuthStore } from '../store/authStore';
 import { buildHeaders } from '../services/syncService';
 import { API_URL } from '../config';
+import StaffActivityScreen from './StaffActivityScreen';
+import AppModal from '../components/AppModal';
 
 interface StaffMember {
     memberId: string;
@@ -29,6 +31,7 @@ interface StaffMember {
     email: string;
     name: string | null;
     role: 'MANAGER' | 'STAFF';
+    status: 'ACTIVE' | 'PENDING';
     joinedAt: string;
 }
 
@@ -42,15 +45,17 @@ interface Props {
 }
 
 export default function StaffManagementScreen({ onBack }: Props) {
-    const { token, activeStoreOwnerId } = useAuthStore(); // activeStoreOwnerId holds the workspaceId
+    const { token, activeStoreOwnerId, activeRole } = useAuthStore();
     const [staff, setStaff] = useState<StaffMember[]>([]);
     const [loading, setLoading] = useState(true);
     const [showAddModal, setShowAddModal] = useState(false);
+    const [selectedMember, setSelectedMember] = useState<StaffMember | null>(null);
 
     // Add staff form state
     const [newEmail, setNewEmail] = useState('');
     const [newRole, setNewRole] = useState<'MANAGER' | 'STAFF'>('STAFF');
     const [adding, setAdding] = useState(false);
+    const [modal, setModal] = useState<{ visible: boolean; type: 'success' | 'error' | 'warning' | 'info'; title: string; subtitle?: string; primaryLabel?: string; onPrimary?: () => void; secondaryLabel?: string; onSecondary?: () => void; autoDismiss?: boolean } | null>(null);
 
     const loadStaff = useCallback(async () => {
         if (!token || !activeStoreOwnerId) return;
@@ -78,7 +83,7 @@ export default function StaffManagementScreen({ onBack }: Props) {
 
     const handleAddStaff = async () => {
         if (!newEmail.trim() || !newEmail.includes('@')) {
-            Alert.alert('Error', 'Please enter a valid email address');
+            setModal({ visible: true, type: 'error', title: 'Error', subtitle: 'Please enter a valid email address' });
             return;
         }
 
@@ -95,60 +100,116 @@ export default function StaffManagementScreen({ onBack }: Props) {
             const data = await res.json();
 
             if (res.ok) {
-                const isNew = data.isNewUser;
-                Alert.alert(
-                    'Staff Added ✓',
-                    isNew
-                        ? `An invitation and temporary password (${data.isNewUser ? 'check email' : ''}) have been sent to ${newEmail}. They can now log in.`
-                        : `${newEmail} has been added to your store as ${newRole}.`,
-                );
+                setModal({ visible: true, type: 'success', title: 'Invitation Sent ✓', subtitle: `An invitation has been sent to ${newEmail}. They must accept it to join your store.`, autoDismiss: true });
                 setShowAddModal(false);
                 setNewEmail('');
                 setNewRole('STAFF');
                 loadStaff();
             } else {
-                Alert.alert('Failed', data.message || 'Could not add staff member');
+                setModal({ visible: true, type: 'error', title: 'Failed', subtitle: data.message || 'Could not add staff member' });
             }
         } catch {
-            Alert.alert('Network Error', 'Could not reach the server');
+            setModal({ visible: true, type: 'error', title: 'Network Error', subtitle: 'Could not reach the server' });
         } finally {
             setAdding(false);
         }
     };
 
     const handleRemove = (member: StaffMember) => {
-        Alert.alert(
-            'Remove Staff',
-            `Remove ${member.name || member.email} from your store? They will lose access immediately.`,
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Remove',
-                    style: 'destructive',
-                    onPress: async () => {
-                        try {
-                            const res = await fetch(`${API_URL}/workspaces/${activeStoreOwnerId}/members/${member.memberId}`, {
-                                method: 'DELETE',
-                                headers: buildHeaders(token!, activeStoreOwnerId),
-                            });
-                            if (res.ok) {
-                                loadStaff();
-                            } else {
-                                Alert.alert('Error', 'Could not remove staff member');
-                            }
-                        } catch {
-                            Alert.alert('Network Error', 'Could not reach the server');
-                        }
-                    },
-                },
-            ]
-        );
+        setModal({
+            visible: true,
+            type: 'warning',
+            title: 'Remove Staff',
+            subtitle: `Remove ${member.name || member.email} from your store? They will lose access immediately.`,
+            primaryLabel: 'Remove',
+            onPrimary: async () => {
+                try {
+                    const res = await fetch(`${API_URL}/workspaces/${activeStoreOwnerId}/members/${member.memberId}`, {
+                        method: 'DELETE',
+                        headers: buildHeaders(token!, activeStoreOwnerId),
+                    });
+                    if (res.ok) {
+                        loadStaff();
+                    } else {
+                        setModal({ visible: true, type: 'error', title: 'Error', subtitle: 'Could not remove staff member' });
+                    }
+                } catch {
+                    setModal({ visible: true, type: 'error', title: 'Network Error', subtitle: 'Could not reach the server' });
+                }
+            },
+            secondaryLabel: 'Cancel',
+        });
+    };
+
+    const handleResend = (member: StaffMember) => {
+        setModal({
+            visible: true,
+            type: 'info',
+            title: 'Resend Invitation',
+            subtitle: `Send a new invitation email to ${member.email}?`,
+            primaryLabel: 'Resend',
+            onPrimary: async () => {
+                try {
+                    const res = await fetch(`${API_URL}/workspaces/${activeStoreOwnerId}/members/${member.memberId}/resend`, {
+                        method: 'POST',
+                        headers: buildHeaders(token!, activeStoreOwnerId),
+                    });
+                    if (res.ok) {
+                        setModal({ visible: true, type: 'success', title: 'Success', subtitle: 'Invitation resent successfully.', autoDismiss: true });
+                        loadStaff();
+                    } else {
+                        setModal({ visible: true, type: 'error', title: 'Error', subtitle: 'Could not resend invitation.' });
+                    }
+                } catch {
+                    setModal({ visible: true, type: 'error', title: 'Network Error', subtitle: 'Could not reach the server' });
+                }
+            },
+            secondaryLabel: 'Cancel',
+        });
+    };
+
+    const handleCancelInvite = (member: StaffMember) => {
+        setModal({
+            visible: true,
+            type: 'warning',
+            title: 'Cancel Invitation',
+            subtitle: `Cancel the pending invitation for ${member.email}?`,
+            primaryLabel: 'Cancel Invite',
+            onPrimary: async () => {
+                try {
+                    const res = await fetch(`${API_URL}/workspaces/${activeStoreOwnerId}/members/${member.memberId}/cancel`, {
+                        method: 'DELETE',
+                        headers: buildHeaders(token!, activeStoreOwnerId),
+                    });
+                    if (res.ok) {
+                        loadStaff();
+                    } else {
+                        setModal({ visible: true, type: 'error', title: 'Error', subtitle: 'Could not cancel invitation.' });
+                    }
+                } catch {
+                    setModal({ visible: true, type: 'error', title: 'Network Error', subtitle: 'Could not reach the server' });
+                }
+            },
+            secondaryLabel: 'Keep',
+        });
     };
 
     const formatDate = (dateStr: string) => {
         const d = new Date(dateStr);
         return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
     };
+
+    // Navigate to activity screen for tapped staff member
+    if (selectedMember) {
+        return (
+            <StaffActivityScreen
+                memberId={selectedMember.userId}
+                memberName={selectedMember.name}
+                memberRole={selectedMember.role}
+                onBack={() => setSelectedMember(null)}
+            />
+        );
+    }
 
     return (
         <View className="flex-1 bg-lightBackground">
@@ -176,8 +237,40 @@ export default function StaffManagementScreen({ onBack }: Props) {
 
             {/* Staff List */}
             {loading ? (
-                <View className="flex-1 items-center justify-center">
-                    <ActivityIndicator size="large" color="#16A34A" />
+                <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+                    {[1, 2, 3].map(i => (
+                        <View
+                            key={i}
+                            style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                padding: 16,
+                                backgroundColor: '#FFFFFF',
+                                borderRadius: 16,
+                                marginBottom: 12,
+                                borderWidth: 0.5,
+                                borderColor: '#E5E7EB',
+                            }}
+                        >
+                            {/* Avatar placeholder */}
+                            <View style={{
+                                width: 44, height: 44, borderRadius: 22,
+                                backgroundColor: '#F1F5F9',
+                            }} />
+                            <View style={{ flex: 1, marginLeft: 12 }}>
+                                {/* Name placeholder */}
+                                <View style={{
+                                    height: 14, width: '60%',
+                                    backgroundColor: '#F1F5F9', borderRadius: 7, marginBottom: 8,
+                                }} />
+                                {/* Role placeholder */}
+                                <View style={{
+                                    height: 10, width: '35%',
+                                    backgroundColor: '#F1F5F9', borderRadius: 5,
+                                }} />
+                            </View>
+                        </View>
+                    ))}
                 </View>
             ) : staff.length === 0 ? (
                 <View className="flex-1 items-center justify-center px-8 opacity-50">
@@ -195,7 +288,11 @@ export default function StaffManagementScreen({ onBack }: Props) {
                     renderItem={({ item }) => {
                         const colors = ROLE_COLORS[item.role] || ROLE_COLORS.STAFF;
                         return (
-                            <View className="bg-white rounded-2xl p-4 mb-3 border border-border shadow-sm flex-row items-center gap-4">
+                            <TouchableOpacity
+                                className="bg-white rounded-2xl p-4 mb-3 border border-border shadow-sm flex-row items-center gap-4"
+                                onPress={() => item.status === 'ACTIVE' && setSelectedMember(item)}
+                                activeOpacity={0.75}
+                            >
                                 {/* Avatar */}
                                 <View className="w-12 h-12 rounded-2xl bg-[#F0FDF4] items-center justify-center">
                                     <Text className="text-primary font-black text-lg">
@@ -205,9 +302,16 @@ export default function StaffManagementScreen({ onBack }: Props) {
 
                                 {/* Info */}
                                 <View className="flex-1">
-                                    <Text className="font-black text-textPrimary text-sm" numberOfLines={1}>
-                                        {item.name || 'Invited User'}
-                                    </Text>
+                                    <View className="flex-row items-center gap-2">
+                                        <Text className="font-black text-textPrimary text-sm" numberOfLines={1}>
+                                            {item.name || 'Invited User'}
+                                        </Text>
+                                        {item.status === 'PENDING' && (
+                                            <View className="bg-amber-100 px-1.5 py-0.5 rounded">
+                                                <Text className="text-[9px] font-bold text-amber-700">PENDING</Text>
+                                            </View>
+                                        )}
+                                    </View>
                                     <View className="flex-row items-center gap-1 mt-0.5">
                                         <Mail size={10} color="#94A3B8" />
                                         <Text className="text-textSecondary text-[11px] font-semibold">
@@ -215,11 +319,11 @@ export default function StaffManagementScreen({ onBack }: Props) {
                                         </Text>
                                     </View>
                                     <Text className="text-textSecondary text-[10px] mt-1">
-                                        Joined {formatDate(item.joinedAt)}
+                                        {item.status === 'PENDING' ? `Invited ${formatDate(item.joinedAt)}` : `Joined ${formatDate(item.joinedAt)}`}
                                     </Text>
                                 </View>
 
-                                {/* Role badge + Remove */}
+                                {/* Role badge + Remove/Resend */}
                                 <View className="items-end gap-2">
                                     <View
                                         style={{
@@ -237,14 +341,25 @@ export default function StaffManagementScreen({ onBack }: Props) {
                                             {item.role}
                                         </Text>
                                     </View>
-                                    <TouchableOpacity
-                                        onPress={() => handleRemove(item)}
-                                        className="p-1.5 bg-red-50 rounded-lg"
-                                    >
-                                        <Trash2 size={14} color="#EF4444" />
-                                    </TouchableOpacity>
+                                    <View className="flex-row gap-2">
+                                        {item.status === 'PENDING' && (
+                                            <TouchableOpacity
+                                                onPress={() => handleResend(item)}
+                                                className="p-1.5 bg-blue-50 rounded-lg"
+                                            >
+                                                <Send size={14} color="#3B82F6" />
+                                            </TouchableOpacity>
+                                        )}
+                                        <TouchableOpacity
+                                            onPress={() => item.status === 'PENDING' ? handleCancelInvite(item) : handleRemove(item)}
+                                            className="p-1.5 bg-red-50 rounded-lg"
+                                        >
+                                            <Trash2 size={14} color="#EF4444" />
+                                        </TouchableOpacity>
+                                    </View>
                                 </View>
-                            </View>
+                                {item.status === 'ACTIVE' && <ChevronRight size={14} color="#CBD5E1" />}
+                            </TouchableOpacity>
                         );
                     }}
                 />
@@ -322,8 +437,7 @@ export default function StaffManagementScreen({ onBack }: Props) {
                             {/* Info note */}
                             <View className="bg-blue-50 border border-blue-100 rounded-xl p-3 mb-6">
                                 <Text className="text-blue-600 text-[11px] font-semibold leading-4">
-                                    💡 If this person doesn't have a KashAm account yet, one will be created automatically.
-                                    An email invitation with their temporary password will be sent.
+                                    💡 They will receive an email invitation to join your store. If they don't have a KashAm account, they will be prompted to create one.
                                 </Text>
                             </View>
 
@@ -342,6 +456,18 @@ export default function StaffManagementScreen({ onBack }: Props) {
                     </View>
                 </View>
             </Modal>
+            <AppModal
+                visible={modal?.visible ?? false}
+                type={modal?.type ?? 'info'}
+                title={modal?.title ?? ''}
+                subtitle={modal?.subtitle}
+                primaryLabel={modal?.primaryLabel}
+                onPrimary={() => { modal?.onPrimary?.(); setModal(null); }}
+                secondaryLabel={modal?.secondaryLabel}
+                onSecondary={() => { modal?.onSecondary?.(); setModal(null); }}
+                onDismiss={() => setModal(null)}
+                autoDismiss={modal?.autoDismiss}
+            />
         </View>
     );
 }

@@ -12,7 +12,7 @@ export class ProductsController {
     @Roles('OWNER', 'MANAGER', 'STAFF')
     @Post('sync')
     syncUserProducts(@Request() req: any, @Body() products: any[]) {
-        return this.productsService.syncUserProducts(req.user.workspaceId, products);
+        return this.productsService.syncUserProducts(req.user.workspaceId, products, req.user.sub);
     }
 
     @Roles('OWNER', 'MANAGER', 'STAFF')

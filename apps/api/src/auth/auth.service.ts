@@ -94,7 +94,7 @@ export class AuthService {
         });
 
         // Create default workspace for new registered user
-        await this.prisma.workspace.create({
+        const workspace = await this.prisma.workspace.create({
             data: {
                 name: businessName || `${name || 'My'}'s Store`,
                 businessType: businessType || 'Other',
@@ -105,24 +105,38 @@ export class AuthService {
                 members: {
                     create: {
                         userId: user.id,
+                        email: normalizedEmail,   // ← required by new schema
                         role: 'OWNER',
                         status: 'ACTIVE',
-                    }
-                }
-            }
+                    },
+                },
+            },
+        });
+
+        // Auto-link any pending workspace invites for this email
+        await this.prisma.workspaceMember.updateMany({
+            where: { email: normalizedEmail, status: 'PENDING' },
+            data: {
+                userId: user.id,
+                status: 'ACTIVE',
+                inviteToken: null,
+                inviteExpiry: null,
+            },
         });
 
         // Send verification email
         const token = randomBytes(32).toString('hex');
+        const code = Math.floor(100000 + Math.random() * 900000).toString();
         await this.prisma.emailVerification.create({
             data: {
                 email: normalizedEmail,
                 token,
+                code,
                 type: 'VERIFY',
                 expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
             },
         });
-        await this.emailService.sendVerificationEmail(normalizedEmail, name || null, token);
+        await this.emailService.sendVerificationEmail(normalizedEmail, name || null, token, code);
 
         return {
             message: 'Registration successful. Please check your email to verify your account.',
@@ -171,15 +185,17 @@ export class AuthService {
         });
 
         const token = randomBytes(32).toString('hex');
+        const code = Math.floor(100000 + Math.random() * 900000).toString();
         await this.prisma.emailVerification.create({
             data: {
                 email: normalizedEmail,
                 token,
+                code,
                 type: 'VERIFY',
                 expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
             },
         });
-        await this.emailService.sendVerificationEmail(normalizedEmail, user.name || null, token);
+        await this.emailService.sendVerificationEmail(normalizedEmail, user.name || null, token, code);
 
         return { success: true, message: 'A new verification email has been sent' };
     }
@@ -199,6 +215,8 @@ export class AuthService {
 
         const tokens = await this.generateTokens(user.id, user.email);
         const workspaces = await this.getUserWorkspaces(user.id);
+        const ownerWorkspace = workspaces.find(w => w.role === 'OWNER');
+        const businessName = ownerWorkspace ? ownerWorkspace.name : (workspaces[0] ? workspaces[0].name : '');
 
         return {
             ...tokens,
@@ -207,6 +225,7 @@ export class AuthService {
             name: user.name,
             country_code: user.countryCode,
             workspaces,
+            businessName,
         };
     }
 
@@ -228,17 +247,19 @@ export class AuthService {
         const normalizedEmail = payload.email.toLowerCase();
 
         // Find or create user
+        let isNewUser = false;
         let user = await this.prisma.user.findFirst({
             where: { OR: [{ googleId: payload.sub }, { email: normalizedEmail }] },
         });
 
         if (!user) {
+            isNewUser = true;
             user = await this.prisma.user.create({
                 data: {
                     email: normalizedEmail,
                     name: payload.name || null,
                     googleId: payload.sub,
-                    emailVerified: true, // Google already verified their email
+                    emailVerified: true,
                     tosAccepted: true,
                     countryCode: 'NG',
                 },
@@ -255,11 +276,22 @@ export class AuthService {
                     members: {
                         create: {
                             userId: user.id,
+                            email: normalizedEmail,   // ← required by new schema
                             role: 'OWNER',
                             status: 'ACTIVE',
-                        }
-                    }
-                }
+                        },
+                    },
+                },
+            });
+            // Auto-link any pending workspace invites for this email
+            await this.prisma.workspaceMember.updateMany({
+                where: { email: normalizedEmail, status: 'PENDING' },
+                data: {
+                    userId: user.id,
+                    status: 'ACTIVE',
+                    inviteToken: null,
+                    inviteExpiry: null,
+                },
             });
         } else if (!user.googleId) {
             // Link existing account to Google
@@ -271,6 +303,8 @@ export class AuthService {
 
         const tokens = await this.generateTokens(user.id, user.email);
         const workspaces = await this.getUserWorkspaces(user.id);
+        const ownerWorkspace = workspaces.find(w => w.role === 'OWNER');
+        const businessName = ownerWorkspace ? ownerWorkspace.name : (workspaces[0] ? workspaces[0].name : '');
 
         return {
             ...tokens,
@@ -278,6 +312,8 @@ export class AuthService {
             email: user.email,
             name: user.name,
             workspaces,
+            businessName,
+            isNewUser,
         };
     }
 
@@ -292,7 +328,9 @@ export class AuthService {
 
             const tokens = await this.generateTokens(user.id, user.email);
             const workspaces = await this.getUserWorkspaces(user.id);
-            return { ...tokens, user_id: user.id, workspaces };
+            const ownerWorkspace = workspaces.find(w => w.role === 'OWNER');
+            const businessName = ownerWorkspace ? ownerWorkspace.name : (workspaces[0] ? workspaces[0].name : '');
+            return { ...tokens, user_id: user.id, workspaces, businessName };
         } catch {
             throw new UnauthorizedException('Invalid or expired refresh token');
         }
@@ -369,5 +407,89 @@ export class AuthService {
     // ── Get My Workspaces ──────────────────────────────────────────────────────
     async getMyWorkspaces(userId: string) {
         return this.getUserWorkspaces(userId);
+    }
+
+    // ── Verify Email Code (OTP) ────────────────────────────────────────────────
+    async verifyEmailCode(email: string, code: string) {
+        const normalizedEmail = email.toLowerCase().trim();
+        const record = await this.prisma.emailVerification.findFirst({
+            where: {
+                email: normalizedEmail,
+                code,
+                type: 'VERIFY',
+                used: false,
+            },
+            orderBy: {
+                createdAt: 'desc',
+            },
+        });
+
+        if (!record) {
+            throw new BadRequestException('Verification code is invalid');
+        }
+        if (new Date() > record.expiresAt) {
+            throw new BadRequestException('Verification code has expired. Please request a new one.');
+        }
+
+        await this.prisma.$transaction([
+            this.prisma.user.update({
+                where: { email: record.email },
+                data: { emailVerified: true },
+            }),
+            this.prisma.emailVerification.update({
+                where: { id: record.id },
+                data: { used: true },
+            }),
+        ]);
+
+        return { success: true, message: 'Email verified successfully. You can now log in.' };
+    }
+
+    // ── Delete Account ─────────────────────────────────────────────────────────
+    async deleteAccount(userId: string) {
+        const user = await this.prisma.user.findUnique({ where: { id: userId } });
+        if (!user) throw new NotFoundException('User not found');
+
+        const ownedWorkspaces = await this.prisma.workspace.findMany({ where: { ownerId: userId } });
+        const ownedWorkspaceIds = ownedWorkspaces.map(w => w.id);
+
+        await this.prisma.$transaction([
+            // Delete staff activities in owned workspaces
+            this.prisma.staffActivity.deleteMany({ where: { workspaceId: { in: ownedWorkspaceIds } } }),
+            // Delete staff activities of user
+            this.prisma.staffActivity.deleteMany({ where: { userId } }),
+            
+            // Delete sales in owned workspaces
+            this.prisma.sale.deleteMany({ where: { workspaceId: { in: ownedWorkspaceIds } } }),
+            // Delete sales made by the user
+            this.prisma.sale.deleteMany({ where: { staffId: userId } }),
+
+            // Delete products in owned workspaces
+            this.prisma.userProduct.deleteMany({ where: { workspaceId: { in: ownedWorkspaceIds } } }),
+
+            // Delete members in owned workspaces
+            this.prisma.workspaceMember.deleteMany({ where: { workspaceId: { in: ownedWorkspaceIds } } }),
+            // Delete memberships of the user
+            this.prisma.workspaceMember.deleteMany({ where: { userId } }),
+
+            // Delete customers in owned workspaces
+            this.prisma.customer.deleteMany({ where: { workspaceId: { in: ownedWorkspaceIds } } }),
+
+            // Delete notifications in owned workspaces
+            this.prisma.notification.deleteMany({ where: { workspaceId: { in: ownedWorkspaceIds } } }),
+            // Delete user notifications
+            this.prisma.notification.deleteMany({ where: { userId } }),
+
+            // Delete email verification records for the user's email
+            this.prisma.emailVerification.deleteMany({ where: { email: user.email } }),
+
+            // Delete the workspaces themselves
+            this.prisma.workspace.deleteMany({ where: { ownerId: userId } }),
+
+            // Finally, delete the User
+            this.prisma.user.delete({ where: { id: userId } }),
+        ]);
+
+        return { success: true, message: 'Account and all associated data deleted successfully' };
     }
 }

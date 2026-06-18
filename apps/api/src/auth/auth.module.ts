@@ -1,10 +1,11 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { EmailService } from './email.service';
 import { JwtModule } from '@nestjs/jwt';
 import { RolesGuard } from './roles.guard';
 import { PrismaModule } from '../prisma/prisma.module';
+import { WorkspaceModule } from '../workspace/workspace.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { PrismaModule } from '../prisma/prisma.module';
       signOptions: { expiresIn: '15m' }, // short-lived access tokens
     }),
     PrismaModule,
+    forwardRef(() => WorkspaceModule),  // ← forward ref to break circular dep
   ],
   providers: [AuthService, EmailService, RolesGuard],
   controllers: [AuthController],

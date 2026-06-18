@@ -458,4 +458,8 @@ export async function createPaymentLog(
     );
 }
 
+export async function getPaymentLogs(userId: string): Promise<any[]> {
+    return await db.getAllAsync('SELECT * FROM payment_logs WHERE user_id = ? ORDER BY created_at DESC', [userId]);
+}
+
 export { db };

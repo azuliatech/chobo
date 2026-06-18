@@ -2,6 +2,7 @@ import {
     Controller,
     Post,
     Get,
+    Delete,
     Body,
     Query,
     HttpCode,
@@ -13,10 +14,14 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { AuthGuard } from './auth.guard';
+import { WorkspaceService } from '../workspace/workspace.service';
 
 @Controller('auth')
 export class AuthController {
-    constructor(private authService: AuthService) {}
+    constructor(
+        private authService: AuthService,
+        private workspaceService: WorkspaceService,
+    ) {}
 
     // ── Registration & Verification ───────────────────────────────────────────
 
@@ -291,5 +296,49 @@ export class AuthController {
     @Get('me')
     getMe(@Request() req: any) {
         return { user_id: req.user.sub, email: req.user.email };
+    }
+
+    // ── Workspace Invite (public + authenticated) ─────────────────────────────
+
+    // GET /auth/invite?token=xxx — public: look up invite details before login
+    @Get('invite')
+    getInviteDetails(@Query('token') token: string) {
+        if (!token) throw new BadRequestException('Invite token is required');
+        return this.workspaceService.getInviteDetails(token);
+    }
+
+    // POST /auth/invite/accept — requires login; links the logged-in user to the invite
+    @UseGuards(AuthGuard)
+    @HttpCode(HttpStatus.OK)
+    @Post('invite/accept')
+    acceptInvite(@Request() req: any, @Body() body: Record<string, any>) {
+        if (!body.token) throw new BadRequestException('Invite token is required');
+        return this.workspaceService.acceptInvite(body.token, req.user.sub);
+    }
+
+    // POST /auth/invite/decline — public: anyone can decline (no account needed)
+    @HttpCode(HttpStatus.OK)
+    @Post('invite/decline')
+    declineInvite(@Body() body: Record<string, any>) {
+        if (!body.token) throw new BadRequestException('Invite token is required');
+        return this.workspaceService.declineInvite(body.token);
+    }
+
+    // POST /auth/verify-email-code
+    @HttpCode(HttpStatus.OK)
+    @Post('verify-email-code')
+    verifyEmailCode(@Body() body: Record<string, any>) {
+        if (!body.email || !body.code) {
+            throw new BadRequestException('Email and code are required');
+        }
+        return this.authService.verifyEmailCode(body.email, body.code);
+    }
+
+    // DELETE /auth/account
+    @UseGuards(AuthGuard)
+    @HttpCode(HttpStatus.OK)
+    @Delete('account')
+    deleteAccount(@Request() req: any) {
+        return this.authService.deleteAccount(req.user.sub);
     }
 }

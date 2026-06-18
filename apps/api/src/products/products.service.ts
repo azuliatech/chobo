@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { StaffActivityAction } from '../workspace/workspace.service';
 
 @Injectable()
 export class ProductsService {
@@ -23,7 +24,7 @@ export class ProductsService {
         });
     }
 
-    async syncUserProducts(workspaceId: string, products: any[]) {
+    async syncUserProducts(workspaceId: string, products: any[], staffId?: string) {
         const results = [];
         for (const p of products) {
             const oldProduct = await this.prisma.userProduct.findUnique({
@@ -63,12 +64,46 @@ export class ProductsService {
                     where: { workspaceId, role: { in: ['OWNER', 'MANAGER'] }, status: 'ACTIVE' },
                 });
                 for (const m of members) {
-                    await this.notificationsService.createNotification(m.userId, 'LOW_STOCK', message, workspaceId);
+                    if (m.userId) {
+                        await this.notificationsService.createNotification(m.userId, 'LOW_STOCK', message, workspaceId);
+                    }
                 }
                 await this.notificationsService.sendToWorkspace(workspaceId, 'Low Stock Alert ⚠️', message);
             }
 
+            // Log PRODUCT_ADDED activity if this is a new product (create path)
+            if (!oldProduct) {
+                this.prisma.staffActivity.create({
+                    data: {
+                        workspaceId,
+                        userId: staffId || workspaceId,
+                        action: StaffActivityAction.PRODUCT_ADDED,
+                        details: {
+                            productName: result.name,
+                            sellingPrice: result.sellingPrice,
+                        },
+                    },
+                }).catch(() => {/* non-blocking */});
+            }
+
+            // Log STOCK_UPDATED if stock changed on an existing product
+            if (oldProduct && oldProduct.stock !== result.stock) {
+                this.prisma.staffActivity.create({
+                    data: {
+                        workspaceId,
+                        userId: staffId || workspaceId,
+                        action: StaffActivityAction.STOCK_UPDATED,
+                        details: {
+                            productName: result.name,
+                            from: oldProduct.stock,
+                            to: result.stock,
+                        },
+                    },
+                }).catch(() => {/* non-blocking */});
+            }
+
             results.push(result);
+
         }
         return results;
     }
@@ -99,7 +134,9 @@ export class ProductsService {
                 where: { workspaceId, role: { in: ['OWNER', 'MANAGER'] }, status: 'ACTIVE' },
             });
             for (const m of members) {
-                await this.notificationsService.createNotification(m.userId, 'LOW_STOCK', message, workspaceId);
+                if (m.userId) {
+                    await this.notificationsService.createNotification(m.userId, 'LOW_STOCK', message, workspaceId);
+                }
             }
             await this.notificationsService.sendToWorkspace(workspaceId, 'Low Stock Alert ⚠️', message);
         }

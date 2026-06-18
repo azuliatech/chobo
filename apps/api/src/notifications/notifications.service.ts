@@ -48,9 +48,9 @@ export class NotificationsService {
         });
 
         const messages: ExpoPushMessage[] = members
-            .filter((m) => m.userId !== excludeUserId && m.user.expoPushToken && Expo.isExpoPushToken(m.user.expoPushToken))
+            .filter((m) => m.userId !== excludeUserId && m.user?.expoPushToken && Expo.isExpoPushToken(m.user.expoPushToken))
             .map((m) => ({
-                to: m.user.expoPushToken!,
+                to: m.user!.expoPushToken!,
                 sound: 'default' as const,
                 title,
                 body,

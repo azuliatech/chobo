@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Platform } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Platform } from 'react-native';
 import Purchases, { PurchasesPackage, LOG_LEVEL } from 'react-native-purchases';
 import { Header } from './SellScreen';
 import { useAuthStore } from '../store/authStore';
 import { CheckCircle2, Star, Zap, Shield } from 'lucide-react-native';
+import AppModal from '../components/AppModal';
 
 const API_KEYS = {
     apple: 'appl_YOUR_REVENUECAT_APPLE_KEY',
@@ -15,6 +16,7 @@ export default function SubscriptionScreen({ onBack }: { onBack: () => void }) {
     const [packages, setPackages] = useState<PurchasesPackage[]>([]);
     const [isPurchasing, setIsPurchasing] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+    const [modal, setModal] = useState<{ visible: boolean; type: 'success' | 'error' | 'warning' | 'info'; title: string; subtitle?: string; primaryLabel?: string; onPrimary?: () => void; secondaryLabel?: string; onSecondary?: () => void; autoDismiss?: boolean } | null>(null);
 
     const isOwner = activeRole === 'OWNER';
     const activeStore = stores.find(s => s.ownerId === activeStoreOwnerId);
@@ -65,7 +67,12 @@ export default function SubscriptionScreen({ onBack }: { onBack: () => void }) {
 
     const handlePurchase = async (pkg: PurchasesPackage) => {
         if (!isOwner) {
-            Alert.alert("Permission Denied", "Only the store owner can upgrade the subscription.");
+            setModal({
+                visible: true,
+                type: 'error',
+                title: 'Permission Denied',
+                subtitle: 'Only the store owner can upgrade the subscription.',
+            });
             return;
         }
 
@@ -76,15 +83,32 @@ export default function SubscriptionScreen({ onBack }: { onBack: () => void }) {
             // Check if the user successfully unlocked the pro entitlement
             if (typeof customerInfo.entitlements.active['pro'] !== 'undefined') {
                 await updateBackendTier('PRO');
-                Alert.alert("Success", "Welcome to the Pro Plan!");
+                setModal({
+                    visible: true,
+                    type: 'success',
+                    title: 'Success',
+                    subtitle: 'Welcome to the Pro Plan!',
+                    autoDismiss: true,
+                });
             } else {
                 // For demo/sandbox purposes if entitlements aren't set up yet
                 await updateBackendTier('PRO');
-                Alert.alert("Success", "Welcome to the Pro Plan! (Demo fallback)");
+                setModal({
+                    visible: true,
+                    type: 'success',
+                    title: 'Success',
+                    subtitle: 'Welcome to the Pro Plan! (Demo fallback)',
+                    autoDismiss: true,
+                });
             }
         } catch (e: any) {
             if (!e.userCancelled) {
-                Alert.alert("Error purchasing package", e.message);
+                setModal({
+                    visible: true,
+                    type: 'error',
+                    title: 'Error purchasing package',
+                    subtitle: e.message,
+                });
             }
         } finally {
             setIsPurchasing(false);
@@ -97,12 +121,28 @@ export default function SubscriptionScreen({ onBack }: { onBack: () => void }) {
             const customerInfo = await Purchases.restorePurchases();
             if (typeof customerInfo.entitlements.active['pro'] !== 'undefined') {
                 await updateBackendTier('PRO');
-                Alert.alert("Success", "Purchases restored successfully!");
+                setModal({
+                    visible: true,
+                    type: 'success',
+                    title: 'Success',
+                    subtitle: 'Purchases restored successfully!',
+                    autoDismiss: true,
+                });
             } else {
-                Alert.alert("No Purchases", "No active subscriptions found to restore.");
+                setModal({
+                    visible: true,
+                    type: 'info',
+                    title: 'No Purchases',
+                    subtitle: 'No active subscriptions found to restore.',
+                });
             }
         } catch (e: any) {
-            Alert.alert("Error restoring purchases", e.message);
+            setModal({
+                visible: true,
+                type: 'error',
+                title: 'Error restoring purchases',
+                subtitle: e.message,
+            });
         } finally {
             setIsPurchasing(false);
         }
@@ -216,6 +256,18 @@ export default function SubscriptionScreen({ onBack }: { onBack: () => void }) {
                 </TouchableOpacity>
 
             </ScrollView>
+            <AppModal
+                visible={modal?.visible ?? false}
+                type={modal?.type ?? 'info'}
+                title={modal?.title ?? ''}
+                subtitle={modal?.subtitle}
+                primaryLabel={modal?.primaryLabel}
+                onPrimary={() => { modal?.onPrimary?.(); setModal(null); }}
+                secondaryLabel={modal?.secondaryLabel}
+                onSecondary={() => { modal?.onSecondary?.(); setModal(null); }}
+                onDismiss={() => setModal(null)}
+                autoDismiss={modal?.autoDismiss}
+            />
         </View>
     );
 }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, TextInput, ScrollView, Image, ActivityIndicator, Alert, ActionSheetIOS, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, ScrollView, Image, ActivityIndicator, ActionSheetIOS, Platform } from 'react-native';
 import { ArrowLeft, Camera, User, Phone, Mail } from 'lucide-react-native';
+import AppModal from '../components/AppModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { pickImageFromGallery, takePhoto } from '../utils/pickImage';
 import { uploadImageToCloudinary } from '../utils/uploadImage';
@@ -14,6 +15,7 @@ export default function PersonalInfoScreen({ onBack }: { onBack: () => void }) {
     const [email, setEmail] = useState('');
     const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
+    const [modal, setModal] = useState<{ visible: boolean; type: 'success' | 'error' | 'warning' | 'info'; title: string; subtitle?: string; primaryLabel?: string; onPrimary?: () => void; secondaryLabel?: string; onSecondary?: () => void; autoDismiss?: boolean } | null>(null);
 
     useEffect(() => {
         loadProfile();
@@ -43,9 +45,20 @@ export default function PersonalInfoScreen({ onBack }: { onBack: () => void }) {
             await AsyncStorage.setItem('profilePhone', phone);
             await AsyncStorage.setItem('profileEmail', email);
             if (profilePhoto) await AsyncStorage.setItem('profilePhoto', profilePhoto);
-            Alert.alert('Success', 'Profile saved successfully!');
+            setModal({
+                visible: true,
+                type: 'success',
+                title: 'Success',
+                subtitle: 'Profile saved successfully!',
+                autoDismiss: true,
+            });
         } catch (e) {
-            Alert.alert('Error', 'Could not save profile details');
+            setModal({
+                visible: true,
+                type: 'error',
+                title: 'Error',
+                subtitle: 'Could not save profile details',
+            });
         } finally {
             setLoading(false);
         }
@@ -63,17 +76,27 @@ export default function PersonalInfoScreen({ onBack }: { onBack: () => void }) {
                 }
             );
         } else {
-            Alert.alert('Add Photo', 'Choose an option', [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Take Photo', onPress: async () => { const uri = await takePhoto(); if (uri) handleUpload(uri); } },
-                { text: 'Choose from Gallery', onPress: async () => { const uri = await pickImageFromGallery(); if (uri) handleUpload(uri); } },
-            ]);
+            setModal({
+                visible: true,
+                type: 'info',
+                title: 'Add Photo',
+                subtitle: 'Choose an option',
+                primaryLabel: 'Take Photo',
+                onPrimary: async () => { const uri = await takePhoto(); if (uri) handleUpload(uri); },
+                secondaryLabel: 'Choose from Gallery',
+                onSecondary: async () => { const uri = await pickImageFromGallery(); if (uri) handleUpload(uri); },
+            });
         }
     };
 
     const handleUpload = async (uri: string) => {
         if (!isOnline) {
-            Alert.alert('Offline', 'Cannot upload photo while offline. Saving locally for now.');
+            setModal({
+                visible: true,
+                type: 'info',
+                title: 'Offline',
+                subtitle: 'Cannot upload photo while offline. Saving locally for now.',
+            });
             setProfilePhoto(uri);
             return;
         }
@@ -83,10 +106,20 @@ export default function PersonalInfoScreen({ onBack }: { onBack: () => void }) {
             if (url) {
                 setProfilePhoto(url);
             } else {
-                Alert.alert('Upload Failed', 'Could not upload image.');
+                setModal({
+                    visible: true,
+                    type: 'error',
+                    title: 'Upload Failed',
+                    subtitle: 'Could not upload image.',
+                });
             }
         } catch (e) {
-            Alert.alert('Error', 'Image upload failed.');
+            setModal({
+                visible: true,
+                type: 'error',
+                title: 'Error',
+                subtitle: 'Image upload failed.',
+            });
         } finally {
             setLoading(false);
         }
@@ -176,6 +209,18 @@ export default function PersonalInfoScreen({ onBack }: { onBack: () => void }) {
                     {loading ? <ActivityIndicator color="white" /> : <Text className="text-white font-black text-lg">Save Changes</Text>}
                 </TouchableOpacity>
             </ScrollView>
+            <AppModal
+                visible={modal?.visible ?? false}
+                type={modal?.type ?? 'info'}
+                title={modal?.title ?? ''}
+                subtitle={modal?.subtitle}
+                primaryLabel={modal?.primaryLabel}
+                onPrimary={() => { modal?.onPrimary?.(); setModal(null); }}
+                secondaryLabel={modal?.secondaryLabel}
+                onSecondary={() => { modal?.onSecondary?.(); setModal(null); }}
+                onDismiss={() => setModal(null)}
+                autoDismiss={modal?.autoDismiss}
+            />
         </View>
     );
 }

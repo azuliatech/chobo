@@ -164,7 +164,7 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         height: SHEET_HEIGHT,
-        backgroundColor: '#1A1A2E',
+        backgroundColor: '#1E293B',
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         paddingBottom: Platform.OS === 'ios' ? 32 : 20,

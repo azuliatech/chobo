@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, FlatList, TextInput, Modal, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Share } from 'react-native';
-import { getTransactionHistory, getDailyStats, getOutstandingDebts, markDebtPaid, createPaymentLog, getSaleItems, getProducts, updateProductQuantity, recordDebtPayment } from '../db';
+import { View, Text, ScrollView, TouchableOpacity, FlatList, TextInput, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, Share } from 'react-native';
+import { getTransactionHistory, getDailyStats, getOutstandingDebts, markDebtPaid, createPaymentLog, getSaleItems, getProducts, updateProductQuantity, recordDebtPayment, getPaymentLogs } from '../db';
+import AppModal from '../components/AppModal';
 import { Header } from './SellScreen';
 import { formatCurrency, formatDate, formatTime } from '../utils/format';
 import { 
@@ -31,10 +32,27 @@ import { ReceiptView } from '../components/ReceiptView';
 export default function TransactionScreen() {
     const [transactions, setTransactions] = useState<any[]>([]);
     const [debts, setDebts] = useState<any[]>([]);
+    const [paymentLogs, setPaymentLogs] = useState<any[]>([]);
     const [stats, setStats] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [filterType, setFilterType] = useState<'all' | 'owing'>('all');
+    
+    // Custom AppModal State
+    const [modalConfig, setModalConfig] = useState<{
+        visible: boolean;
+        type: 'success' | 'error' | 'warning' | 'info';
+        title: string;
+        subtitle?: string;
+        primaryLabel?: string;
+        onPrimary?: () => void;
+        secondaryLabel?: string;
+        onSecondary?: () => void;
+    }>({
+        visible: false,
+        type: 'info',
+        title: '',
+    });
     
     // Expand/Collapse state mapping saleId -> items
     const [expandedRows, setExpandedRows] = useState<Record<string, any[]>>({});
@@ -82,16 +100,18 @@ export default function TransactionScreen() {
         if (!userId) return;
         setLoading(true);
         try {
-            const [tRows, dRows, sData, pRows] = await Promise.all([
+            const [tRows, dRows, sData, pRows, payLogs] = await Promise.all([
                 getTransactionHistory(userId),
                 getOutstandingDebts(userId),
                 getDailyStats(userId, 'today'),
-                getProducts(userId)
+                getProducts(userId),
+                getPaymentLogs(userId)
             ]);
             setTransactions(tRows);
             setDebts(dRows);
             setStats(sData);
             setDbProducts(pRows || []);
+            setPaymentLogs(payLogs || []);
         } catch (e) {
             console.error(e);
         } finally {
@@ -129,7 +149,6 @@ export default function TransactionScreen() {
         }
     }, [dateFilter]);
 
-    // ── Derived / filtered lists ──────────────────────────────────────────────
     const filteredTransactions = React.useMemo(() => {
         let list = transactions.filter(t => isWithinDateRange(t.timestamp));
         if (searchQuery.trim()) {
@@ -141,6 +160,36 @@ export default function TransactionScreen() {
         }
         return list;
     }, [transactions, searchQuery, isWithinDateRange]);
+
+    const filteredPaymentLogs = React.useMemo(() => {
+        let list = paymentLogs.filter(p => isWithinDateRange(p.created_at));
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            list = list.filter(p =>
+                (p.sender_name || '').toLowerCase().includes(q) ||
+                (p.sender_phone || '').includes(searchQuery)
+            );
+        }
+        return list;
+    }, [paymentLogs, searchQuery, isWithinDateRange]);
+
+    const mergedHistory = React.useMemo(() => {
+        const salesEntries = filteredTransactions.map(t => ({
+            ...t,
+            _type: 'sale' as const,
+            _timestamp: t.timestamp || t.created_at || 0,
+        }));
+
+        const paymentEntries = filteredPaymentLogs.map(p => ({
+            ...p,
+            _type: 'payment_log' as const,
+            _timestamp: p.created_at || 0,
+        }));
+
+        return [...salesEntries, ...paymentEntries].sort(
+            (a, b) => Number(b._timestamp) - Number(a._timestamp)
+        );
+    }, [filteredTransactions, filteredPaymentLogs]);
 
     const filteredDebts = React.useMemo(() => {
         let list = debts;
@@ -171,9 +220,16 @@ export default function TransactionScreen() {
     };
 
     const handleDebtPaidInFull = async (debt: any) => {
-        Alert.alert('Mark as Paid', `Has ${debt.customer_name} paid the remaining balance of ${currencySymbol}${formatAmount(debt.amount_owed).replace(currencySymbol, '')} in full?`, [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Yes, Paid', style: 'default', onPress: async () => {
+        setModalConfig({
+            visible: true,
+            type: 'info',
+            title: 'Mark as Paid',
+            subtitle: `Has ${debt.customer_name} paid the remaining balance of ${currencySymbol}${formatAmount(debt.amount_owed).replace(currencySymbol, '')} in full?`,
+            primaryLabel: 'Yes, Paid',
+            secondaryLabel: 'Cancel',
+            onSecondary: () => setModalConfig(prev => ({ ...prev, visible: false })),
+            onPrimary: async () => {
+                setModalConfig(prev => ({ ...prev, visible: false }));
                 try {
                     await markDebtPaid(debt.id);
                     await createPaymentLog(
@@ -189,24 +245,44 @@ export default function TransactionScreen() {
                     setDebtDetailsModal(false);
                     await loadData();
                 } catch (e) {
-                    Alert.alert('Error', 'Failed to mark debt as paid.');
+                    setModalConfig({
+                        visible: true,
+                        type: 'error',
+                        title: 'Error',
+                        subtitle: 'Failed to mark debt as paid.',
+                    });
                 }
-            }}
-        ]);
+            }
+        });
     };
 
     const handleDebtPaidPartially = async () => {
         if (!partialAmount) {
-            Alert.alert('Required', 'Please enter the partial payment amount.');
+            setModalConfig({
+                visible: true,
+                type: 'warning',
+                title: 'Required',
+                subtitle: 'Please enter the partial payment amount.',
+            });
             return;
         }
         const parsedAmount = parseFloat(partialAmount.replace(/,/g, ''));
         if (isNaN(parsedAmount) || parsedAmount <= 0) {
-            Alert.alert('Invalid', 'Please enter a valid amount.');
+            setModalConfig({
+                visible: true,
+                type: 'warning',
+                title: 'Invalid',
+                subtitle: 'Please enter a valid amount.',
+            });
             return;
         }
         if (parsedAmount > selectedDebt.amount_owed) {
-            Alert.alert('Invalid', `Amount cannot exceed the total balance owed (${currencySymbol}${formatAmount(selectedDebt.amount_owed).replace(currencySymbol, '')}).`);
+            setModalConfig({
+                visible: true,
+                type: 'warning',
+                title: 'Invalid',
+                subtitle: `Amount cannot exceed the total balance owed (${currencySymbol}${formatAmount(selectedDebt.amount_owed).replace(currencySymbol, '')}).`,
+            });
             return;
         }
         setPartialLoading(true);
@@ -227,9 +303,19 @@ export default function TransactionScreen() {
             setPartialAmount('');
             setShowPartialInput(false);
             await loadData();
-            Alert.alert('Success', 'Partial payment recorded successfully!');
+            setModalConfig({
+                visible: true,
+                type: 'success',
+                title: 'Success',
+                subtitle: 'Partial payment recorded successfully!',
+            });
         } catch (e) {
-            Alert.alert('Error', 'Failed to record partial payment.');
+            setModalConfig({
+                visible: true,
+                type: 'error',
+                title: 'Error',
+                subtitle: 'Failed to record partial payment.',
+            });
         } finally {
             setPartialLoading(false);
         }
@@ -242,18 +328,33 @@ export default function TransactionScreen() {
             await Share.share({ message });
         } catch (error) {
             console.error('Error sharing reminder', error);
-            Alert.alert('Error', 'Could not open share sheet.');
+            setModalConfig({
+                visible: true,
+                type: 'error',
+                title: 'Error',
+                subtitle: 'Could not open share sheet.',
+            });
         }
     };
 
     const handleLogPayment = async () => {
         if (!logAmount) {
-            Alert.alert('Required', 'Please enter an amount.');
+            setModalConfig({
+                visible: true,
+                type: 'warning',
+                title: 'Required',
+                subtitle: 'Please enter an amount.',
+            });
             return;
         }
         const parsedAmount = parseFloat(logAmount.replace(/,/g, ''));
         if (isNaN(parsedAmount) || parsedAmount <= 0) {
-            Alert.alert('Invalid', 'Please enter a valid amount.');
+            setModalConfig({
+                visible: true,
+                type: 'warning',
+                title: 'Invalid',
+                subtitle: 'Please enter a valid amount.',
+            });
             return;
         }
         setLogLoading(true);
@@ -261,7 +362,12 @@ export default function TransactionScreen() {
             if (deductStock && selectedProduct) {
                 const qty = parseInt(productQuantity, 10);
                 if (isNaN(qty) || qty <= 0) {
-                    Alert.alert('Invalid', 'Please enter a valid quantity to deduct.');
+                    setModalConfig({
+                        visible: true,
+                        type: 'warning',
+                        title: 'Invalid',
+                        subtitle: 'Please enter a valid quantity to deduct.',
+                    });
                     setLogLoading(false);
                     return;
                 }
@@ -297,7 +403,12 @@ export default function TransactionScreen() {
             setProductQuantity('1');
             await loadData();
         } catch (e) {
-            Alert.alert('Error', 'Failed to log payment.');
+            setModalConfig({
+                visible: true,
+                type: 'error',
+                title: 'Error',
+                subtitle: 'Failed to log payment.',
+            });
         } finally {
             setLogLoading(false);
         }
@@ -338,7 +449,12 @@ export default function TransactionScreen() {
                     if (isAvailable) {
                         await Sharing.shareAsync(uri, { UTI: 'public.jpeg', mimeType: 'image/jpeg' });
                     } else {
-                        Alert.alert('Error', 'Sharing is not available on this device');
+                        setModal({
+                            visible: true,
+                            type: 'error',
+                            title: 'Error',
+                            subtitle: 'Sharing is not available on this device',
+                        });
                     }
                 }
             } catch (error) {
@@ -439,13 +555,40 @@ export default function TransactionScreen() {
                     <View className="py-16 items-center"><ActivityIndicator color="#16A34A" /></View>
                 ) : filterType === 'all' ? (
                     <View className="px-6 mb-12">
-                        {filteredTransactions.length === 0 && (
+                        {mergedHistory.length === 0 && (
                             <View className="py-16 items-center opacity-30">
                                 <Receipt size={48} color="#64748B" />
                                 <Text className="font-bold mt-4 text-center text-base">No transactions found.</Text>
                             </View>
                         )}
-                        {filteredTransactions.map(t => {
+                        {mergedHistory.map(t => {
+                            if (t._type === 'payment_log') {
+                                return (
+                                    <View key={t.id} className="bg-white rounded-2xl mb-4 border border-border shadow-sm overflow-hidden p-4 flex-row items-center">
+                                        <View className="w-12 h-12 rounded-xl items-center justify-center mr-4 bg-blue-50">
+                                            <Banknote size={24} color="#2563EB" />
+                                        </View>
+                                        <View className="flex-1">
+                                            <Text className="font-bold text-sm text-textPrimary">{t.sender_name || 'Anonymous Sender'}</Text>
+                                            <Text className="text-textSecondary text-[10px] font-bold uppercase mt-1">
+                                                {t.payment_method || 'TRANSFER'} · {formatTime(t._timestamp)}
+                                            </Text>
+                                            {t.description && (
+                                                <Text className="text-slate-400 text-[11px] mt-1 font-medium">{t.description}</Text>
+                                            )}
+                                        </View>
+                                        <View className="items-end mr-3">
+                                            <Text className="text-blue-600 font-black text-sm">+{formatAmount(t.amount)}</Text>
+                                            <View className="bg-blue-100 px-2 py-0.5 rounded-full mt-1">
+                                                <Text className="text-[10px] font-black uppercase text-blue-600">
+                                                    Manual log
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    </View>
+                                );
+                            }
+                            
                             const isExpanded = !!expandedRows[t.id];
                             return (
                                 <View key={t.id} className="bg-white rounded-2xl mb-4 border border-border shadow-sm overflow-hidden">
@@ -457,7 +600,7 @@ export default function TransactionScreen() {
                                             <Receipt size={24} color={t.payment_type === 'PAY_LATER' ? '#EF4444' : '#16A34A'} />
                                         </View>
                                         <View className="flex-1">
-                                            <Text className="font-bold text-sm text-textPrimary">{t.customer_name || 'Guest Customer'}</Text>
+                                            <Text className="font-bold text-sm text-textPrimary">{t.customer_name || 'Walk-in customer'}</Text>
                                             <Text className="text-textSecondary text-[10px] font-bold uppercase mt-1">
                                                 {(() => {
                                                     switch (t.payment_type) {
@@ -467,7 +610,7 @@ export default function TransactionScreen() {
                                                         case 'POS': return 'POS';
                                                         default: return t.payment_type;
                                                     }
-                                                })()} · {formatTime(t.timestamp)}
+                                                })()} · {formatTime(t._timestamp)}
                                             </Text>
                                         </View>
                                         <View className="items-end mr-3">

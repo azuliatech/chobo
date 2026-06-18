@@ -2,13 +2,23 @@ import {
     BadRequestException,
     ConflictException,
     ForbiddenException,
+    GoneException,
     Injectable,
     NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../auth/email.service';
-import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
+
+// ── Staff Activity Action Types ─────────────────────────────────────────────
+export enum StaffActivityAction {
+    SALE_COMPLETED = 'SALE_COMPLETED',
+    PRODUCT_ADDED = 'PRODUCT_ADDED',
+    STOCK_UPDATED = 'STOCK_UPDATED',
+    DISCOUNT_GIVEN = 'DISCOUNT_GIVEN',
+    DEBT_CREATED = 'DEBT_CREATED',
+    PAYMENT_LOGGED = 'PAYMENT_LOGGED',
+}
 
 @Injectable()
 export class WorkspaceService {
@@ -25,7 +35,6 @@ export class WorkspaceService {
         });
 
         if (existingOwned >= 1) {
-            // Check if owner has a Pro or Enterprise membership somewhere
             const ownerMembership = await this.prisma.workspaceMember.findFirst({
                 where: { userId: ownerId, role: 'OWNER', status: 'ACTIVE' },
                 include: { workspace: { select: { tier: true } } },
@@ -38,6 +47,12 @@ export class WorkspaceService {
                 );
             }
         }
+
+        // Look up the owner's email to populate WorkspaceMember.email
+        const owner = await this.prisma.user.findUnique({
+            where: { id: ownerId },
+            select: { email: true },
+        });
 
         // Create workspace and add owner as OWNER member in a transaction
         const workspace = await this.prisma.$transaction(async (tx) => {
@@ -56,6 +71,7 @@ export class WorkspaceService {
                 data: {
                     workspaceId: ws.id,
                     userId: ownerId,
+                    email: owner?.email ?? '',
                     role: 'OWNER',
                     status: 'ACTIVE',
                 },
@@ -101,9 +117,9 @@ export class WorkspaceService {
     // ── Get Workspace Members ──────────────────────────────────────────────────
     async getMembers(workspaceId: string) {
         const members = await this.prisma.workspaceMember.findMany({
-            where: { workspaceId, status: 'ACTIVE' },
+            where: { workspaceId, status: { in: ['ACTIVE', 'PENDING'] } },
             include: {
-                user: { select: { id: true, email: true, name: true, expoPushToken: true } },
+                user: { select: { id: true, name: true, expoPushToken: true } },
             },
             orderBy: { createdAt: 'asc' },
         });
@@ -111,15 +127,15 @@ export class WorkspaceService {
         return members.map((m) => ({
             memberId: m.id,
             userId: m.userId,
-            email: m.user.email,
-            name: m.user.name,
+            email: m.email,
+            name: m.user?.name ?? null,
             role: m.role,
             status: m.status,
             joinedAt: m.createdAt,
         }));
     }
 
-    // ── Invite Staff by Email ──────────────────────────────────────────────────
+    // ── Invite Staff by Email (token-based) ────────────────────────────────────
     async inviteMember(workspaceId: string, inviterUserId: string, email: string, role: string) {
         if (!['MANAGER', 'STAFF'].includes(role)) {
             throw new BadRequestException('Role must be MANAGER or STAFF');
@@ -131,15 +147,15 @@ export class WorkspaceService {
         });
         if (!workspace) throw new NotFoundException('Workspace not found');
 
-        // Staff limit check
-        const memberCount = await this.prisma.workspaceMember.count({
+        // Staff limit check (count only ACTIVE members, not pending invites)
+        const activeCount = await this.prisma.workspaceMember.count({
             where: { workspaceId, status: 'ACTIVE' },
         });
 
-        if (workspace.tier === 'FREE' && memberCount >= 1) {
+        if (workspace.tier === 'FREE' && activeCount >= 1) {
             throw new ForbiddenException('Free plan only allows the owner. Upgrade to Pro to add staff.');
         }
-        if (workspace.tier === 'PRO' && memberCount >= 3) {
+        if (workspace.tier === 'PRO' && activeCount >= 3) {
             throw new ForbiddenException('Pro plan allows up to 3 members. Upgrade to Enterprise for unlimited staff.');
         }
 
@@ -151,55 +167,203 @@ export class WorkspaceService {
             throw new BadRequestException('You cannot invite yourself');
         }
 
-        // Generate temp password for new users
-        const tempPassword = randomBytes(4).toString('hex'); // 8-char random hex
-        let isNewUser = false;
+        // Check if already a member with ACTIVE or PENDING status
+        const existing = await this.prisma.workspaceMember.findFirst({
+            where: { workspaceId, email: normalizedEmail, status: { in: ['ACTIVE', 'PENDING'] } },
+        });
+        if (existing?.status === 'ACTIVE') {
+            throw new ConflictException('This person is already an active member of this workspace');
+        }
 
-        // Find or create user
-        let staffUser = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
-        if (!staffUser) {
-            const salt = await bcrypt.genSalt();
-            const hashedPassword = await bcrypt.hash(tempPassword, salt);
-            staffUser = await this.prisma.user.create({
+        // Check if email belongs to an existing KashAm user
+        const existingUser = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+        const hasGoogleAccount = existingUser ? !existingUser.password : false;
+
+        // Generate invite token (7 days expiry)
+        const inviteToken = randomBytes(32).toString('hex');
+        const inviteExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+        let member: any;
+
+        if (existing?.status === 'DECLINED' || existing) {
+            // Re-invite: update the existing record with a fresh token
+            member = await this.prisma.workspaceMember.update({
+                where: { id: existing.id },
                 data: {
-                    email: normalizedEmail,
-                    password: hashedPassword,
-                    emailVerified: true, // Invited staff are pre-verified
-                    tosAccepted: true,
-                    countryCode: 'NG',
+                    role,
+                    status: 'PENDING',
+                    userId: existingUser?.id ?? null,
+                    inviteToken,
+                    inviteExpiry,
                 },
             });
-            isNewUser = true;
-        }
-
-        // Add or re-activate membership
-        try {
-            const member = await this.prisma.workspaceMember.upsert({
-                where: { workspaceId_userId: { workspaceId, userId: staffUser.id } },
-                update: { role, status: 'ACTIVE' },
-                create: { workspaceId, userId: staffUser.id, role, status: 'ACTIVE' },
+        } else {
+            // New invite: create PENDING record
+            member = await this.prisma.workspaceMember.create({
+                data: {
+                    workspaceId,
+                    userId: existingUser?.id ?? null,
+                    email: normalizedEmail,
+                    role,
+                    status: 'PENDING',
+                    inviteToken,
+                    inviteExpiry,
+                },
             });
-
-            // Send invite email
-            await this.emailService.sendStaffInviteEmail(
-                normalizedEmail,
-                workspace.name,
-                inviter?.name || null,
-                isNewUser ? tempPassword : '(use your existing password)',
-            );
-
-            return {
-                success: true,
-                memberId: member.id,
-                userId: staffUser.id,
-                email: normalizedEmail,
-                role,
-                isNewUser,
-            };
-        } catch (e: any) {
-            if (e.code === 'P2002') throw new ConflictException('This user is already a member of this workspace');
-            throw e;
         }
+
+        // Send appropriate email based on whether the user has an account
+        if (existingUser) {
+            await this.emailService.sendExistingUserInvite({
+                toEmail: normalizedEmail,
+                toName: existingUser.name ?? null,
+                workspaceName: workspace.name,
+                role,
+                inviteToken,
+            });
+        } else {
+            await this.emailService.sendNewUserInvite({
+                toEmail: normalizedEmail,
+                workspaceName: workspace.name,
+                role,
+                inviteToken,
+            });
+        }
+
+        return {
+            success: true,
+            memberId: member.id,
+            email: normalizedEmail,
+            role,
+            status: 'PENDING',
+            isExistingUser: !!existingUser,
+            hasGoogleAccount,
+        };
+    }
+
+    // ── Get Invite Details (public — for deep link handling) ───────────────────
+    async getInviteDetails(token: string) {
+        const member = await this.prisma.workspaceMember.findUnique({
+            where: { inviteToken: token },
+            include: {
+                workspace: { select: { name: true } },
+                user: { select: { id: true, password: true } },
+            },
+        });
+
+        if (!member) throw new NotFoundException('Invite not found or already used');
+        if (member.inviteExpiry && member.inviteExpiry < new Date()) {
+            throw new GoneException('This invite link has expired. Ask the workspace owner to send a new one.');
+        }
+        if (member.status !== 'PENDING') {
+            throw new ConflictException('This invite has already been used or cancelled');
+        }
+
+        // hasGoogleAccount: user exists but has no password (Google-only signup)
+        const hasGoogleAccount = member.user ? !member.user.password : false;
+
+        return {
+            workspaceName: member.workspace.name,
+            role: member.role,
+            email: member.email,
+            emailExists: !!member.user,
+            hasGoogleAccount,
+        };
+    }
+
+    // ── Accept Invite ──────────────────────────────────────────────────────────
+    async acceptInvite(token: string, userId: string) {
+        const member = await this.prisma.workspaceMember.findUnique({
+            where: { inviteToken: token },
+            include: { workspace: { select: { name: true } } },
+        });
+
+        if (!member || member.status !== 'PENDING') {
+            throw new BadRequestException('Invalid or already used invite');
+        }
+        if (member.inviteExpiry && member.inviteExpiry < new Date()) {
+            throw new GoneException('This invite has expired');
+        }
+
+        await this.prisma.workspaceMember.update({
+            where: { inviteToken: token },
+            data: {
+                status: 'ACTIVE',
+                userId,
+                inviteToken: null,   // invalidate after use
+                inviteExpiry: null,
+            },
+        });
+
+        return {
+            message: 'Invite accepted',
+            workspaceId: member.workspaceId,
+            workspaceName: member.workspace.name,
+        };
+    }
+
+    // ── Decline Invite ─────────────────────────────────────────────────────────
+    async declineInvite(token: string) {
+        const member = await this.prisma.workspaceMember.findUnique({
+            where: { inviteToken: token },
+        });
+        if (!member) throw new NotFoundException('Invite not found');
+
+        await this.prisma.workspaceMember.update({
+            where: { inviteToken: token },
+            data: { status: 'DECLINED', inviteToken: null, inviteExpiry: null },
+        });
+
+        return { message: 'Invite declined' };
+    }
+
+    // ── Resend Invite ──────────────────────────────────────────────────────────
+    async resendInvite(memberId: string, workspaceId: string) {
+        const member = await this.prisma.workspaceMember.findFirst({
+            where: { id: memberId, workspaceId, status: 'PENDING' },
+            include: { workspace: { select: { name: true } } },
+        });
+        if (!member) throw new NotFoundException('Pending invite not found');
+
+        const inviteToken = randomBytes(32).toString('hex');
+        const inviteExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+        await this.prisma.workspaceMember.update({
+            where: { id: memberId },
+            data: { inviteToken, inviteExpiry },
+        });
+
+        const existingUser = await this.prisma.user.findUnique({ where: { email: member.email } });
+
+        if (existingUser) {
+            await this.emailService.sendExistingUserInvite({
+                toEmail: member.email,
+                toName: existingUser.name ?? null,
+                workspaceName: member.workspace.name,
+                role: member.role,
+                inviteToken,
+            });
+        } else {
+            await this.emailService.sendNewUserInvite({
+                toEmail: member.email,
+                workspaceName: member.workspace.name,
+                role: member.role,
+                inviteToken,
+            });
+        }
+
+        return { message: 'Invite resent' };
+    }
+
+    // ── Cancel Pending Invite ──────────────────────────────────────────────────
+    async cancelInvite(memberId: string, workspaceId: string) {
+        const member = await this.prisma.workspaceMember.findFirst({
+            where: { id: memberId, workspaceId, status: 'PENDING' },
+        });
+        if (!member) throw new NotFoundException('Pending invite not found');
+
+        await this.prisma.workspaceMember.delete({ where: { id: memberId } });
+        return { message: 'Invite cancelled' };
     }
 
     // ── Change Member Role ─────────────────────────────────────────────────────
@@ -238,8 +402,8 @@ export class WorkspaceService {
 
     // ── Leave Workspace (Self-Exit) ────────────────────────────────────────────
     async leaveWorkspace(workspaceId: string, userId: string) {
-        const member = await this.prisma.workspaceMember.findUnique({
-            where: { workspaceId_userId: { workspaceId, userId } },
+        const member = await this.prisma.workspaceMember.findFirst({
+            where: { workspaceId, userId, status: 'ACTIVE' },
         });
         if (!member) throw new NotFoundException('You are not a member of this workspace');
         if (member.role === 'OWNER') {
@@ -248,10 +412,7 @@ export class WorkspaceService {
             );
         }
 
-        await this.prisma.workspaceMember.delete({
-            where: { workspaceId_userId: { workspaceId, userId } },
-        });
-
+        await this.prisma.workspaceMember.delete({ where: { id: member.id } });
         return { success: true, message: 'You have left this workspace' };
     }
 
@@ -261,7 +422,6 @@ export class WorkspaceService {
         if (!workspace) throw new NotFoundException('Workspace not found');
         if (workspace.ownerId !== ownerId) throw new ForbiddenException('Only the owner can delete this workspace');
 
-        // Soft delete — mark as suspended (preserves all historical data)
         await this.prisma.workspace.update({
             where: { id: workspaceId },
             data: { status: 'SUSPENDED' },
@@ -277,5 +437,99 @@ export class WorkspaceService {
             data: { tier },
         });
         return { success: true, workspace };
+    }
+
+    // ── Staff Activity Log ─────────────────────────────────────────────────────
+
+    async logActivity(
+        workspaceId: string,
+        userId: string,
+        action: StaffActivityAction,
+        details: Record<string, any>,
+    ): Promise<void> {
+        try {
+            await this.prisma.staffActivity.create({
+                data: { workspaceId, userId, action, details },
+            });
+        } catch (e) {
+            console.warn('[StaffActivity] Failed to log activity:', e);
+        }
+    }
+
+    async getStaffActivity(
+        workspaceId: string,
+        targetUserId: string,
+        filter: 'today' | 'week' | 'month' | 'all' = 'today',
+    ) {
+        let from: Date | null = new Date();
+        if (filter === 'today') {
+            from.setHours(0, 0, 0, 0);
+        } else if (filter === 'week') {
+            from.setDate(from.getDate() - 7);
+            from.setHours(0, 0, 0, 0);
+        } else if (filter === 'month') {
+            from.setMonth(from.getMonth() - 1);
+            from.setHours(0, 0, 0, 0);
+        } else {
+            from = null; // 'all' — no date filter
+        }
+
+        const activities = await this.prisma.staffActivity.findMany({
+            where: {
+                workspaceId,
+                userId: targetUserId,
+                ...(from ? { createdAt: { gte: from } } : {}),
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+
+        const salesActivities = activities.filter(a => a.action === 'SALE_COMPLETED');
+        const totalRevenue = salesActivities.reduce((sum, a) => {
+            const d = a.details as Record<string, any>;
+            return sum + (Number(d?.amount) || 0);
+        }, 0);
+
+        const actionCounts = activities.reduce((acc: Record<string, number>, a) => {
+            acc[a.action] = (acc[a.action] || 0) + 1;
+            return acc;
+        }, {});
+        const topAction = Object.entries(actionCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+
+        return {
+            activities,
+            summary: {
+                totalSales: salesActivities.length,
+                totalRevenue,
+                topAction,
+                totalActions: activities.length,
+            },
+        };
+    }
+
+    async update(workspaceId: string, name?: string, businessType?: string, countryCode?: string) {
+        const workspace = await this.prisma.workspace.update({
+            where: { id: workspaceId },
+            data: {
+                name: name !== undefined ? name : undefined,
+                businessType: businessType !== undefined ? businessType : undefined,
+                countryCode: countryCode !== undefined ? countryCode : undefined,
+            },
+        });
+        return { success: true, workspace };
+    }
+
+    async getById(workspaceId: string) {
+        const workspace = await this.prisma.workspace.findUnique({
+            where: { id: workspaceId },
+        });
+        if (!workspace) throw new NotFoundException('Workspace not found');
+        return workspace;
+    }
+
+    async getMemberRole(workspaceId: string, userId: string): Promise<string | null> {
+        const member = await this.prisma.workspaceMember.findFirst({
+            where: { workspaceId, userId, status: 'ACTIVE' },
+        });
+        return member?.role ?? null;
     }
 }

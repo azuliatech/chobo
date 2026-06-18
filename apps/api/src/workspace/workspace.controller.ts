@@ -6,12 +6,13 @@ import {
     Delete,
     Body,
     Param,
+    Query,
     HttpCode,
     HttpStatus,
     BadRequestException,
     UseGuards,
     Request,
-    ForbiddenException
+    ForbiddenException,
 } from '@nestjs/common';
 import { WorkspaceService } from './workspace.service';
 import { AuthGuard } from '../auth/auth.guard';
@@ -51,6 +52,24 @@ export class WorkspaceController {
     inviteMember(@Param('id') id: string, @Request() req: any, @Body() body: Record<string, any>) {
         if (!body.email || !body.role) throw new BadRequestException('Email and role are required');
         return this.workspaceService.inviteMember(id, req.user.sub, body.email, body.role);
+    }
+
+    // POST /workspaces/:id/members/:memberId/resend — resend invite (OWNER only)
+    @UseGuards(RolesGuard)
+    @Roles('OWNER')
+    @HttpCode(HttpStatus.OK)
+    @Post(':id/members/:memberId/resend')
+    resendInvite(@Param('id') workspaceId: string, @Param('memberId') memberId: string) {
+        return this.workspaceService.resendInvite(memberId, workspaceId);
+    }
+
+    // DELETE /workspaces/:id/members/:memberId/cancel — cancel pending invite (OWNER only)
+    @UseGuards(RolesGuard)
+    @Roles('OWNER')
+    @HttpCode(HttpStatus.OK)
+    @Delete(':id/members/:memberId/cancel')
+    cancelInvite(@Param('id') workspaceId: string, @Param('memberId') memberId: string) {
+        return this.workspaceService.cancelInvite(memberId, workspaceId);
     }
 
     // PATCH /workspaces/:id/members/:memberId — change role (OWNER only)
@@ -104,5 +123,44 @@ export class WorkspaceController {
             throw new BadRequestException('Invalid tier provided');
         }
         return this.workspaceService.upgradeTier(id, tier);
+    }
+
+    // GET /workspaces/:id — get workspace details
+    @Get(':id')
+    getWorkspace(@Param('id') id: string) {
+        return this.workspaceService.getById(id);
+    }
+
+    // PATCH /workspaces/:id — update workspace name/details (OWNER only)
+    @UseGuards(RolesGuard)
+    @Roles('OWNER')
+    @Patch(':id')
+    updateWorkspace(
+        @Param('id') id: string,
+        @Body() body: Record<string, any>,
+    ) {
+        return this.workspaceService.update(
+            id, 
+            body.name, 
+            body.businessType !== undefined ? body.businessType : body.business_type, 
+            body.country_code
+        );
+    }
+
+    // ── Staff Activity Log ─────────────────────────────────────────────────────
+
+    // GET /workspaces/:id/members/:memberId/activity?filter=today|week|month
+    @UseGuards(RolesGuard)
+    @Roles('OWNER', 'MANAGER')
+    @Get(':id/members/:memberId/activity')
+    async getStaffActivity(
+        @Param('id') workspaceId: string,
+        @Param('memberId') memberId: string,
+        @Query('filter') filter: string,
+    ) {
+        const validFilter = ['today', 'week', 'month', 'all'].includes(filter)
+            ? (filter as 'today' | 'week' | 'month' | 'all')
+            : 'today';
+        return this.workspaceService.getStaffActivity(workspaceId, memberId, validFilter);
     }
 }

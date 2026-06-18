@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { StaffActivityAction } from '../workspace/workspace.service';
 
 @Injectable()
 export class SalesService {
@@ -58,6 +59,38 @@ export class SalesService {
                     );
                 }
             }
+            // Log each sale as SALE_COMPLETED activity (non-blocking)
+            for (const s of changes.sales.created) {
+                const discountAmt = s.discount_amount ?? s.discountAmount ?? 0;
+                this.prisma.staffActivity.create({
+                    data: {
+                        workspaceId,
+                        userId: staffId,
+                        action: StaffActivityAction.SALE_COMPLETED,
+                        details: {
+                            amount: s.total ?? 0,
+                            paymentMethod: s.payment_type ?? s.paymentType ?? 'CASH',
+                            itemCount: 0, // saleItems not yet created at this point
+                        },
+                    },
+                }).catch(() => {/* non-blocking */});
+
+                // Log separate DISCOUNT_GIVEN if discount was applied
+                if (discountAmt !== 0) {
+                    this.prisma.staffActivity.create({
+                        data: {
+                            workspaceId,
+                            userId: staffId,
+                            action: StaffActivityAction.DISCOUNT_GIVEN,
+                            details: {
+                                originalAmount: (s.total ?? 0) + discountAmt,
+                                finalAmount: s.total ?? 0,
+                                discountAmount: discountAmt,
+                            },
+                        },
+                    }).catch(() => {/* non-blocking */});
+                }
+            }
         }
 
         if (changes?.saleItems?.created?.length > 0) {
@@ -76,6 +109,7 @@ export class SalesService {
 
         return { changes: {}, timestamp: Date.now() };
     }
+
 
     async getDailySummary(workspaceId: string) {
         const today = new Date();

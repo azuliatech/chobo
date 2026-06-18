@@ -31,6 +31,7 @@ model User {
   memberships      WorkspaceMember[]
   staffSales       Sale[]             @relation("SaleStaff")
   notifications    Notification[]
+  staffActivities  StaffActivity[]
 }
 
 // ──────────────────────────────────────────────
@@ -53,6 +54,7 @@ model Workspace {
   sales         Sale[]
   customers     Customer[]
   notifications Notification[]
+  staffActivities StaffActivity[]
 
   @@index([ownerId])
 }
@@ -61,18 +63,22 @@ model Workspace {
 // WORKSPACE MEMBER
 // ──────────────────────────────────────────────
 model WorkspaceMember {
-  id          String    @id @default(uuid())
-  workspaceId String
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role        String    // OWNER | MANAGER | STAFF
-  status      String    @default("ACTIVE") // ACTIVE | REMOVED
-  createdAt   DateTime  @default(now())
+  id           String    @id @default(uuid())
+  workspaceId  String
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId       String?                              // nullable — null until invited user completes signup
+  user         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  email        String                               // always present — used to match on signup
+  role         String                               // OWNER | MANAGER | STAFF
+  status       String    @default("PENDING")        // PENDING | ACTIVE | DECLINED | REMOVED
+  inviteToken  String?   @unique                    // one-time use invite token
+  inviteExpiry DateTime?                            // token expiry (7 days)
+  createdAt    DateTime  @default(now())
 
-  @@unique([workspaceId, userId])
+  @@unique([workspaceId, email])                    // email is always present; replaces [workspaceId, userId]
   @@index([workspaceId])
   @@index([userId])
+  @@index([inviteToken])
 }
 
 // ──────────────────────────────────────────────
@@ -82,6 +88,7 @@ model EmailVerification {
   id        String   @id @default(uuid())
   email     String
   token     String   @unique
+  code      String?
   type      String   @default("VERIFY") // VERIFY | RESET_PASSWORD
   expiresAt DateTime
   used      Boolean  @default(false)
@@ -230,4 +237,21 @@ model CatalogueProduct {
   category  String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ──────────────────────────────────────────────
+// STAFF ACTIVITY LOG
+// ──────────────────────────────────────────────
+model StaffActivity {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action      String    // SALE_COMPLETED | PRODUCT_ADDED | STOCK_UPDATED | DISCOUNT_GIVEN | DEBT_CREATED | PAYMENT_LOGGED
+  details     Json      // flexible metadata per action type
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId, userId])
+  @@index([workspaceId, createdAt])
 }

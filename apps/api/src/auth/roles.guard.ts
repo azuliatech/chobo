@@ -39,12 +39,10 @@ export class RolesGuard implements CanActivate {
         }
 
         // Verify the user is an active member of the requested workspace
-        const member = await this.prisma.workspaceMember.findUnique({
+        const member = await this.prisma.workspaceMember.findFirst({
             where: {
-                workspaceId_userId: {
-                    workspaceId,
-                    userId: user.sub,
-                },
+                workspaceId,
+                userId: user.sub,
             },
             include: {
                 workspace: { select: { id: true, status: true } },

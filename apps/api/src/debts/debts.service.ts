@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { StaffActivityAction } from '../workspace/workspace.service';
 
 @Injectable()
 export class DebtsService {
@@ -24,7 +25,7 @@ export class DebtsService {
             }
         }
 
-        return this.prisma.debt.upsert({
+        const debt = await this.prisma.debt.upsert({
             where: { id: data.id },
             update: {
                 customerId: data.customerId,
@@ -38,7 +39,25 @@ export class DebtsService {
                 amountOwed: data.amountOwed,
                 saleId: data.saleId,
                 status: data.status,
-            }
+            },
         });
+
+        // Log DEBT_CREATED activity (non-blocking, only on create — not on status update)
+        if (data.status !== 'PAID') {
+            this.prisma.staffActivity.create({
+                data: {
+                    workspaceId: data.workspaceId,
+                    userId: data.staffId || data.workspaceId, // staffId if provided, fallback to workspaceId
+                    action: StaffActivityAction.DEBT_CREATED,
+                    details: {
+                        customerName: customer.name || customer.phone || 'Unknown',
+                        amount: data.amountOwed,
+                    },
+                },
+            }).catch(() => {/* non-blocking */});
+        }
+
+        return debt;
     }
 }
+

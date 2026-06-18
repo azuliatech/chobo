@@ -8,6 +8,7 @@ const BUSINESS_NAME_KEY = 'businessName';
 const USER_ID_KEY = 'userId';
 const ACTIVE_STORE_OWNER_KEY = 'activeStoreOwnerId';
 const ACTIVE_ROLE_KEY = 'activeRole';
+const STORES_KEY = 'userStores';
 
 /** Decode JWT payload without a library (base64url split). */
 function decodeJwtPayload(token: string): Record<string, any> | null {
@@ -22,10 +23,11 @@ function decodeJwtPayload(token: string): Record<string, any> | null {
 }
 
 export interface StoreAccess {
-    ownerId: string;
+    ownerId: string;      // maps from workspaceId returned by the backend
     shopName: string | null;
     role: 'OWNER' | 'MANAGER' | 'STAFF';
     status: string;
+    tier?: string;        // FREE | PRO | ENTERPRISE
 }
 
 interface AuthState {
@@ -37,7 +39,7 @@ interface AuthState {
 
     // Multi-store state
     stores: StoreAccess[];
-    activeStoreOwnerId: string | null; // The owner whose catalog is currently active
+    activeStoreOwnerId: string | null; // The workspace ID currently active
     activeRole: 'OWNER' | 'MANAGER' | 'STAFF' | null;
 
     showSubscriptionModal: boolean;
@@ -54,6 +56,10 @@ interface AuthState {
     restoreToken: () => Promise<void>;
     setBusinessName: (name: string) => Promise<void>;
     switchStore: (ownerId: string) => Promise<void>;
+
+    // New actions for workspace sync
+    setStores: (stores: StoreAccess[]) => void;
+    setActiveWorkspace: (workspace: StoreAccess) => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -77,14 +83,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             if (businessName) await AsyncStorage.setItem(BUSINESS_NAME_KEY, businessName);
 
             // Determine the active store:
-            // - If there's only 1 store (most users), auto-select it.
-            // - If there are multiple (multi-store staff), default to the first OWNER store.
+            // - Default to the OWNER store, or first store in list.
             const defaultStore = stores.find(s => s.role === 'OWNER') || stores[0] || null;
             const activeStoreOwnerId = defaultStore?.ownerId || userId;
             const activeRole = defaultStore?.role || 'OWNER';
 
             await AsyncStorage.setItem(ACTIVE_STORE_OWNER_KEY, activeStoreOwnerId);
             await AsyncStorage.setItem(ACTIVE_ROLE_KEY, activeRole);
+
+            // Persist stores[] so workspace switcher survives app restarts
+            await AsyncStorage.setItem(STORES_KEY, JSON.stringify(stores));
 
             set({
                 token,
@@ -104,8 +112,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         try {
             await SecureStore.deleteItemAsync(TOKEN_KEY);
             await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
-            await AsyncStorage.removeItem(ACTIVE_STORE_OWNER_KEY);
-            await AsyncStorage.removeItem(ACTIVE_ROLE_KEY);
+            await AsyncStorage.multiRemove([
+                ACTIVE_STORE_OWNER_KEY,
+                ACTIVE_ROLE_KEY,
+                STORES_KEY,
+                BUSINESS_NAME_KEY,
+                USER_ID_KEY,
+            ]);
             set({
                 token: null,
                 refreshToken: null,
@@ -122,7 +135,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     restoreToken: async () => {
         try {
-            const [token, refreshToken, userId, businessName, activeStoreOwnerId, activeRole] =
+            const [token, refreshToken, userId, businessName, activeStoreOwnerId, activeRole, storedStores] =
                 await Promise.all([
                     SecureStore.getItemAsync(TOKEN_KEY),
                     SecureStore.getItemAsync(REFRESH_TOKEN_KEY),
@@ -130,6 +143,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                     AsyncStorage.getItem(BUSINESS_NAME_KEY),
                     AsyncStorage.getItem(ACTIVE_STORE_OWNER_KEY),
                     AsyncStorage.getItem(ACTIVE_ROLE_KEY),
+                    AsyncStorage.getItem(STORES_KEY),  // ← now restored
                 ]);
 
             // Fallback: if userId wasn't persisted separately, decode from token
@@ -139,13 +153,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                 resolvedUserId = payload?.sub ?? null;
             }
 
+            // Parse stored stores[]
+            let restoredStores: StoreAccess[] = [];
+            if (storedStores) {
+                try {
+                    restoredStores = JSON.parse(storedStores);
+                } catch {
+                    restoredStores = [];
+                }
+            }
+
             set({
                 token,
                 refreshToken,
                 userId: resolvedUserId,
                 businessName,
                 isReady: true,
-                // Restore active store context (stores[] will be re-fetched on next login)
+                stores: restoredStores,  // ← restored from AsyncStorage
                 activeStoreOwnerId: activeStoreOwnerId || resolvedUserId,
                 activeRole: (activeRole as 'OWNER' | 'MANAGER' | 'STAFF') || 'OWNER',
             });
@@ -182,6 +206,39 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
         await AsyncStorage.setItem(ACTIVE_STORE_OWNER_KEY, ownerId);
         await AsyncStorage.setItem(ACTIVE_ROLE_KEY, target.role);
-        set({ activeStoreOwnerId: ownerId, activeRole: target.role });
+        if (target.shopName) await AsyncStorage.setItem(BUSINESS_NAME_KEY, target.shopName);
+        set({
+            activeStoreOwnerId: ownerId,
+            activeRole: target.role,
+            businessName: target.shopName,
+        });
+    },
+
+    /**
+     * Update the stores[] list in memory + AsyncStorage.
+     * Called after background workspace refresh from the backend.
+     */
+    setStores: (stores: StoreAccess[]) => {
+        set({ stores });
+        AsyncStorage.setItem(STORES_KEY, JSON.stringify(stores)).catch(console.error);
+    },
+
+    /**
+     * Switch the active workspace using a full StoreAccess object.
+     * Updates businessName, tier, role, and activeStoreOwnerId atomically.
+     */
+    setActiveWorkspace: async (workspace: StoreAccess) => {
+        await Promise.all([
+            AsyncStorage.setItem(ACTIVE_STORE_OWNER_KEY, workspace.ownerId),
+            AsyncStorage.setItem(ACTIVE_ROLE_KEY, workspace.role),
+            workspace.shopName
+                ? AsyncStorage.setItem(BUSINESS_NAME_KEY, workspace.shopName)
+                : Promise.resolve(),
+        ]);
+        set({
+            activeStoreOwnerId: workspace.ownerId,
+            activeRole: workspace.role,
+            businessName: workspace.shopName,
+        });
     },
 }));

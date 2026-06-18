@@ -1,7 +1,7 @@
-import React, { useState, useCallback, useEffect } from 'react';
 import {
-    View, Text, TextInput, TouchableOpacity, FlatList, Modal, ScrollView, Image, ActivityIndicator, Alert
+    View, Text, TextInput, TouchableOpacity, FlatList, Modal, ScrollView, Image, ActivityIndicator
 } from 'react-native';
+import AppModal from '../components/AppModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getProducts, createProduct, updateProduct, updateProductQuantity, deleteProduct, getStockSummary } from '../db';
 import { pushSalesToBackend } from '../services/syncService';
@@ -63,6 +63,7 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
     const [searchQuery, setSearchQuery] = useState('');
     const [summary, setSummary] = useState({ total: 0, low: 0, outOfStock: 0 });
     const [modalVisible, setModalVisible] = useState(false);
+    const [modal, setModal] = useState<{ visible: boolean; type: 'success' | 'error' | 'warning' | 'info'; title: string; subtitle?: string; primaryLabel?: string; onPrimary?: () => void; secondaryLabel?: string; onSecondary?: () => void; autoDismiss?: boolean } | null>(null);
     const [scannerVisible, setScannerVisible] = useState(false);
     const [editingProduct, setEditingProduct] = useState<any>(null);
     const [loading, setLoading] = useState(false);
@@ -150,7 +151,12 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
             setShowLookupStatus(false);
             setScannerVisible(false);
             handleEdit(local);
-            Alert.alert('Found', `${local.name} is already in your stock.`);
+            setModal({
+                visible: true,
+                type: 'info',
+                title: 'Found',
+                subtitle: `${local.name} is already in your stock.`,
+            });
             return;
         }
 
@@ -167,7 +173,12 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
         if (!isOnline) {
             setShowLookupStatus(false);
             setScannerVisible(false);
-            Alert.alert('Offline', "You're offline — barcode lookup unavailable. Fill in details manually.");
+            setModal({
+                visible: true,
+                type: 'info',
+                title: 'Offline',
+                subtitle: "You're offline — barcode lookup unavailable. Fill in details manually.",
+            });
             setModalVisible(true);
             return;
         }
@@ -339,13 +350,18 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
     };
 
     const handleDelete = (product: any) => {
-        Alert.alert('Delete', `Are you sure you want to delete ${product.name}?`, [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Delete', style: 'destructive', onPress: async () => {
+        setModal({
+            visible: true,
+            type: 'warning',
+            title: 'Delete',
+            subtitle: `Are you sure you want to delete ${product.name}?`,
+            primaryLabel: 'Delete',
+            onPrimary: async () => {
                 await deleteProduct(product.id);
                 loadData();
-            }}
-        ]);
+            },
+            secondaryLabel: 'Cancel',
+        });
     };
 
     const handleSave = async () => {
@@ -403,9 +419,19 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
             loadData();
         } catch (e: any) {
             if (e.message?.includes('UNIQUE')) {
-                Alert.alert('Error', 'Barcode already exists');
+                setModal({
+                    visible: true,
+                    type: 'error',
+                    title: 'Error',
+                    subtitle: 'Barcode already exists',
+                });
             } else {
-                Alert.alert('Error', 'Could not save product');
+                setModal({
+                    visible: true,
+                    type: 'error',
+                    title: 'Error',
+                    subtitle: 'Could not save product',
+                });
             }
         } finally {
             setLoading(false);
@@ -683,11 +709,16 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                             {/* Image Selection Area with Absolute Delete X Overlay */}
                             <View className="w-24 h-24 self-center mb-6 relative">
                                 <TouchableOpacity onPress={() => {
-                                    Alert.alert("Product Image", "Choose an option", [
-                                        { text: "Take Photo", onPress: takePhoto },
-                                        { text: "Choose from Gallery", onPress: pickImage },
-                                        { text: "Cancel", style: "cancel" }
-                                    ])
+                                    setModal({
+                                        visible: true,
+                                        type: 'info',
+                                        title: 'Product Image',
+                                        subtitle: 'Choose an option',
+                                        primaryLabel: 'Take Photo',
+                                        onPrimary: takePhoto,
+                                        secondaryLabel: 'Choose from Gallery',
+                                        onSecondary: pickImage,
+                                    });
                                 }} className="w-full h-full bg-lightBackground rounded-3xl items-center justify-center border border-border overflow-hidden shadow-sm">
                                     {imageUri ? (
                                         <Image source={{ uri: imageUri }} className="w-full h-full" resizeMode="cover" />
@@ -848,6 +879,18 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                     </View>
                 </View>
             </Modal>
+            <AppModal
+                visible={modal?.visible ?? false}
+                type={modal?.type ?? 'info'}
+                title={modal?.title ?? ''}
+                subtitle={modal?.subtitle}
+                primaryLabel={modal?.primaryLabel}
+                onPrimary={() => { modal?.onPrimary?.(); setModal(null); }}
+                secondaryLabel={modal?.secondaryLabel}
+                onSecondary={() => { modal?.onSecondary?.(); setModal(null); }}
+                onDismiss={() => setModal(null)}
+                autoDismiss={modal?.autoDismiss}
+            />
         </View>
     );
 }

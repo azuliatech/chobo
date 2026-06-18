@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useCartStore } from '../store/cartStore';
 import { StoreSwitcherSheet } from '../components/StoreSwitcherSheet';
 import { Header } from './SellScreen';
+import AppModal from '../components/AppModal';
 import { 
     User, 
     Settings, 
@@ -50,6 +51,7 @@ export default function MoreScreen() {
     const { clearCart } = useCartStore();
     const [activeSubScreen, setActiveSubScreen] = useState<string | null>(null);
     const [showStoreSwitcher, setShowStoreSwitcher] = useState(false);
+    const [modal, setModal] = useState<{ visible: boolean; type: 'success' | 'error' | 'warning' | 'info'; title: string; subtitle?: string; primaryLabel?: string; onPrimary?: () => void; secondaryLabel?: string; onSecondary?: () => void; autoDismiss?: boolean } | null>(null);
 
     const isCashier = activeRole === 'STAFF';
     const isOwner = activeRole === 'OWNER';
@@ -59,44 +61,61 @@ export default function MoreScreen() {
     const staffStores = stores.filter(s => s.ownerId !== userId);
 
     const handleSignOut = () => {
-        Alert.alert(
-            'Sign Out',
-            'Are you sure you want to sign out?',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Sign Out', style: 'destructive', onPress: async () => {
-                    clearCart();
-                    await logout();
-                }}
-            ]
-        );
+        setModal({
+            visible: true,
+            type: 'warning',
+            title: 'Sign Out',
+            subtitle: 'Are you sure you want to sign out?',
+            primaryLabel: 'Sign Out',
+            onPrimary: async () => {
+                clearCart();
+                await logout();
+            },
+            secondaryLabel: 'Cancel',
+        });
     };
 
     const handleLeaveStore = (ownerId: string, shopName: string) => {
-        Alert.alert(
-            'Leave Store',
-            `Are you sure you want to leave "${shopName}"? You will lose access unless the owner adds you again.`,
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Leave Store',
-                    style: 'destructive',
-                    onPress: async () => {
-                        try {
-                            const { token } = useAuthStore.getState();
-                            await fetch(`${require('../config').API_URL}/auth/staff/leave/${ownerId}`, {
-                                method: 'DELETE',
-                                headers: { Authorization: `Bearer ${token}` },
-                            });
-                            Alert.alert('Done', 'You have left this store.');
-                            // Refresh will happen on next login
-                        } catch {
-                            Alert.alert('Error', 'Could not leave the store. Try again.');
-                        }
-                    },
-                },
-            ]
-        );
+        setModal({
+            visible: true,
+            type: 'warning',
+            title: 'Leave Store',
+            subtitle: `Are you sure you want to leave "${shopName}"? You will lose access unless the owner adds you again.`,
+            primaryLabel: 'Leave Store',
+            onPrimary: async () => {
+                try {
+                    const { token } = useAuthStore.getState();
+                    const res = await fetch(`${require('../config').API_URL}/auth/staff/leave/${ownerId}`, {
+                        method: 'DELETE',
+                        headers: { Authorization: `Bearer ${token}` },
+                    });
+                    if (res.ok) {
+                        setModal({
+                            visible: true,
+                            type: 'success',
+                            title: 'Done',
+                            subtitle: 'You have left this store.',
+                            autoDismiss: true,
+                        });
+                    } else {
+                        setModal({
+                            visible: true,
+                            type: 'error',
+                            title: 'Error',
+                            subtitle: 'Could not leave the store. Try again.',
+                        });
+                    }
+                } catch {
+                    setModal({
+                        visible: true,
+                        type: 'error',
+                        title: 'Error',
+                        subtitle: 'Could not leave the store. Try again.',
+                    });
+                }
+            },
+            secondaryLabel: 'Cancel',
+        });
     };
 
     if (activeSubScreen === 'PersonalInfo') return <PersonalInfoScreen onBack={() => setActiveSubScreen(null)} />;
@@ -254,7 +273,7 @@ export default function MoreScreen() {
                             />
                         )}
                     </View>
-                    <Text className="text-center text-textSecondary text-[10px] mt-8 font-bold">KashAm v1.2.0 · Offline-First Engine</Text>
+                    <Text className="text-center text-textSecondary text-[10px] mt-8 font-bold">KashAm v1.0.0</Text>
                 </View>
             </ScrollView>
 
@@ -262,6 +281,18 @@ export default function MoreScreen() {
             <StoreSwitcherSheet
                 visible={showStoreSwitcher}
                 onClose={() => setShowStoreSwitcher(false)}
+            />
+            <AppModal
+                visible={modal?.visible ?? false}
+                type={modal?.type ?? 'info'}
+                title={modal?.title ?? ''}
+                subtitle={modal?.subtitle}
+                primaryLabel={modal?.primaryLabel}
+                onPrimary={() => { modal?.onPrimary?.(); setModal(null); }}
+                secondaryLabel={modal?.secondaryLabel}
+                onSecondary={() => { modal?.onSecondary?.(); setModal(null); }}
+                onDismiss={() => setModal(null)}
+                autoDismiss={modal?.autoDismiss}
             />
         </View>
     );
