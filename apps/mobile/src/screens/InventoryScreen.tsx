@@ -1,3 +1,4 @@
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     View, Text, TextInput, TouchableOpacity, FlatList, Modal, ScrollView, Image, ActivityIndicator
 } from 'react-native';
@@ -38,6 +39,7 @@ interface InventoryScreenProps {
 }
 
 type LookupState = 'idle' | 'local' | 'kasham' | 'global' | 'done';
+type StockTab = 'inStock' | 'lowStock' | 'outOfStock';
 const CATEGORIES = [
     { label: 'Provisions', value: 'Provisions' },
     { label: 'Beverages', value: 'Beverages' },

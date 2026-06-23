@@ -11,8 +11,10 @@ import {
     Wallet, 
     Receipt, 
     ArrowUpRight, 
-    Package
+    Package,
+    Sparkles
 } from 'lucide-react-native';
+
 
 type TimeFilter = 'today' | 'week' | 'month';
 
