@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: kasham-api-staging
+    name: chobo-api-staging
     env: node
     plan: free
     rootDir: apps/api
@@ -24,14 +24,14 @@ services:
       - key: RESEND_API_KEY
         sync: false # To be mapped to Resend API key
       - key: RESEND_FROM_EMAIL
-        sync: false # e.g., onboarding@resend.dev or kasham@resend.com
+        sync: false # e.g., onboarding@resend.dev or chobo@resend.com
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
         sync: false
 
   - type: web
-    name: kasham-api-production
+    name: chobo-api-production
     env: node
     plan: free
     rootDir: apps/api

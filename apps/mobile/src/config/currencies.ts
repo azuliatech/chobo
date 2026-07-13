@@ -1,5 +1,5 @@
 /**
- * KashAm — Currency Configuration
+ * Chobo — Currency Configuration
  * Currency is derived from the country code selected during onboarding.
  * To change currency, the user changes their country in Personal Info.
  */

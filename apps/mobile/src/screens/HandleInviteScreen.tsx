@@ -178,16 +178,16 @@ export default function HandleInviteScreen({
                 {/* ── Loaded — Show Invite Card ── */}
                 {(state === 'loaded' || state === 'accepting' || state === 'declining') && invite && (
                     <View className="items-center">
-                        {/* KashAm Logo Badge */}
+                        {/* Chobo Logo Badge */}
                         <View className="w-20 h-20 rounded-3xl bg-primary items-center justify-center mb-6 shadow-lg">
-                            <Text className="text-white text-4xl font-black">K</Text>
+                            <Text className="text-white text-4xl font-black">C</Text>
                         </View>
 
                         <Text className="text-3xl font-black text-textPrimary text-center mb-2">
                             Workspace Invitation
                         </Text>
                         <Text className="text-textSecondary text-center text-base font-semibold mb-8 px-4">
-                            You've been invited to join a workspace on KashAm
+                            You've been invited to join a workspace on Chobo
                         </Text>
 
                         {/* Invite Details Card */}
@@ -227,8 +227,8 @@ export default function HandleInviteScreen({
                                 </View>
                                 <Text className="text-amber-600 text-xs font-semibold">
                                     {invite.emailExists
-                                        ? 'You already have a KashAm account. Sign in to accept this invitation.'
-                                        : 'You don\'t have a KashAm account yet. Create one to accept this invitation.'}
+                                        ? 'You already have a Chobo account. Sign in to accept this invitation.'
+                                        : 'You don\'t have a Chobo account yet. Create one to accept this invitation.'}
                                 </Text>
                             </View>
                         )}

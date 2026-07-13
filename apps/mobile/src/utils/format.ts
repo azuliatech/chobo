@@ -1,5 +1,5 @@
 /**
- * Centralized formatting utilities for KashAm.
+ * Centralized formatting utilities for Chobo.
  */
 
 export const formatCurrency = (amount: number, symbol: string = '₦'): string => {

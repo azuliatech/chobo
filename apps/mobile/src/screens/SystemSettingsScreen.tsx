@@ -1,11 +1,24 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Switch } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ArrowLeft, Bell } from 'lucide-react-native';
 import AppModal from '../components/AppModal';
 
 export default function SystemSettingsScreen({ onBack }: { onBack: () => void }) {
     const [pushNotifs, setPushNotifs] = useState(true);
     const [modal, setModal] = useState<{ visible: boolean; type: 'success' | 'error' | 'warning' | 'info'; title: string; subtitle?: string; primaryLabel?: string; onPrimary?: () => void; secondaryLabel?: string; onSecondary?: () => void; autoDismiss?: boolean } | null>(null);
+
+    useEffect(() => {
+        AsyncStorage.getItem('pushNotificationsEnabled').then(val => {
+            setPushNotifs(val !== 'false'); // default true
+        });
+    }, []);
+
+    const handlePushNotifsToggle = async (value: boolean) => {
+        setPushNotifs(value);
+        await AsyncStorage.setItem('pushNotificationsEnabled', value.toString());
+        // TODO: When push notification service is integrated, send preference to backend here
+    };
 
     return (
         <View className="flex-1 bg-lightBackground">
@@ -32,7 +45,7 @@ export default function SystemSettingsScreen({ onBack }: { onBack: () => void })
                         </View>
                         <Switch
                             value={pushNotifs}
-                            onValueChange={setPushNotifs}
+                            onValueChange={handlePushNotifsToggle}
                             trackColor={{ false: '#CBD5E1', true: '#16A34A' }}
                         />
                     </View>

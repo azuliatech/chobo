@@ -437,7 +437,7 @@ export default function StaffManagementScreen({ onBack }: Props) {
                             {/* Info note */}
                             <View className="bg-blue-50 border border-blue-100 rounded-xl p-3 mb-6">
                                 <Text className="text-blue-600 text-[11px] font-semibold leading-4">
-                                    💡 They will receive an email invitation to join your store. If they don't have a KashAm account, they will be prompted to create one.
+                                    💡 They will receive an email invitation to join your store. If they don't have a Chobo account, they will be prompted to create one.
                                 </Text>
                             </View>
 

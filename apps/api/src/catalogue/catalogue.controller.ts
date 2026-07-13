@@ -35,11 +35,11 @@ async function reuploadToCloudinary(
 
     // Build signed upload using Cloudinary REST API (upload via URL)
     const timestamp = Math.round(Date.now() / 1000);
-    const folder = 'kasham';
+    const folder = 'chobo';
 
     // Generate signature
     const crypto = await import('crypto');
-    const paramsToSign = `folder=${folder}&timestamp=${timestamp}&upload_preset=kasham_server`;
+    const paramsToSign = `folder=${folder}&timestamp=${timestamp}&upload_preset=chobo_server`;
     const signature = crypto
       .createHash('sha1')
       .update(paramsToSign + apiSecret)
@@ -47,7 +47,7 @@ async function reuploadToCloudinary(
 
     const formData = new URLSearchParams();
     formData.append('file', thirdPartyUrl);
-    formData.append('upload_preset', 'kasham_server');
+    formData.append('upload_preset', 'chobo_server');
     formData.append('folder', folder);
     formData.append('api_key', apiKey);
     formData.append('timestamp', timestamp.toString());

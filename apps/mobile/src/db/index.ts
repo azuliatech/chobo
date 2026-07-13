@@ -1,6 +1,10 @@
 import * as SQLite from 'expo-sqlite';
 
-const db = SQLite.openDatabaseSync('kasham.db');
+// NOTE: Database renamed from kasham.db to chobo.db as part of the Chobo rebrand.
+// Existing test users will lose local SQLite data on next install.
+// For production launch, implement a migration that copies kasham.db → chobo.db on first launch.
+// TODO: Before public launch, add migration logic in initDatabase() to detect and rename the old DB file.
+const db = SQLite.openDatabaseSync('chobo.db');
 
 export async function initDatabase() {
     await db.execAsync(`PRAGMA journal_mode = WAL`);

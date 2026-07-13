@@ -1,10 +1,48 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, TextInput, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, ScrollView, ActivityIndicator } from 'react-native';
 import { ArrowLeft, Lock } from 'lucide-react-native';
+import AppModal from '../components/AppModal';
+import { useAuthStore } from '../store/authStore';
+import { API_URL } from '../config';
 
 export default function SecurityScreen({ onBack }: { onBack: () => void }) {
     const [currentPass, setCurrentPass] = useState('');
     const [newPass, setNewPass] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [modal, setModal] = useState<{ visible: boolean; type: 'success' | 'error' | 'warning' | 'info'; title: string; subtitle?: string; primaryLabel?: string; onPrimary?: () => void; secondaryLabel?: string; onSecondary?: () => void; autoDismiss?: boolean } | null>(null);
+
+    const isPasswordValid = newPass.length >= 8 && /[A-Z]/.test(newPass) && /[0-9]/.test(newPass) && /[^A-Za-z0-9]/.test(newPass);
+
+    const handleChangePassword = async () => {
+        if (!currentPass || !newPass) return;
+        if (!isPasswordValid) {
+            setModal({ visible: true, type: 'error', title: 'Weak password', subtitle: 'Your new password does not meet the requirements.' });
+            return;
+        }
+        setLoading(true);
+        try {
+            const token = useAuthStore.getState().token;
+            const res = await fetch(`${API_URL}/auth/change-password`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ currentPassword: currentPass, newPassword: newPass }),
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.message || 'Failed');
+            }
+            setCurrentPass('');
+            setNewPass('');
+            setModal({ visible: true, type: 'success', title: 'Password updated', subtitle: 'Your password has been changed successfully.', autoDismiss: true });
+        } catch (e: any) {
+            setModal({ visible: true, type: 'error', title: 'Update failed', subtitle: e.message === 'Incorrect current password' || e.message === 'Unauthorized' ? 'Your current password is incorrect.' : 'Could not update password. Please try again.' });
+        } finally {
+            setLoading(false);
+        }
+    };
 
     return (
         <View className="flex-1 bg-lightBackground">
@@ -45,11 +83,23 @@ export default function SecurityScreen({ onBack }: { onBack: () => void }) {
                             />
                         </View>
                     </View>
-                    <TouchableOpacity className={`py-4 rounded-xl items-center ${currentPass && newPass ? 'bg-black' : 'bg-border'}`}>
-                        <Text className="text-white font-black">Update Password</Text>
+                    <TouchableOpacity 
+                        className={`py-4 rounded-xl items-center ${currentPass && newPass && isPasswordValid && !loading ? 'bg-black active:bg-gray-800' : 'bg-border opacity-50'}`}
+                        onPress={handleChangePassword}
+                        disabled={loading || !currentPass || !newPass || !isPasswordValid}
+                    >
+                        {loading ? <ActivityIndicator color="white" /> : <Text className="text-white font-black">Update Password</Text>}
                     </TouchableOpacity>
                 </View>
             </ScrollView>
+            <AppModal
+                visible={modal?.visible ?? false}
+                type={modal?.type ?? 'info'}
+                title={modal?.title ?? ''}
+                subtitle={modal?.subtitle}
+                onDismiss={() => setModal(null)}
+                autoDismiss={modal?.autoDismiss}
+            />
         </View>
     );
 }

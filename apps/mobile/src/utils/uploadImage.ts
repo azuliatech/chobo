@@ -1,5 +1,5 @@
 /**
- * Cloudinary unsigned upload utility for KashAm.
+ * Cloudinary unsigned upload utility for Chobo.
  * Uses an unsigned upload preset — no API secret needed on the frontend.
  */
 export const uploadImageToCloudinary = async (localUri: string): Promise<string | null> => {
@@ -15,7 +15,7 @@ export const uploadImageToCloudinary = async (localUri: string): Promise<string 
         const formData = new FormData();
         formData.append('file', { uri: localUri, type: 'image/jpeg', name: 'upload.jpg' } as any);
         formData.append('upload_preset', uploadPreset);
-        formData.append('folder', 'kasham');
+        formData.append('folder', 'chobo');
 
         const response = await fetch(
             `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,

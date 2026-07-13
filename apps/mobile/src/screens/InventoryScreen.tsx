@@ -38,7 +38,7 @@ interface InventoryScreenProps {
     onClearBarcode?: () => void;
 }
 
-type LookupState = 'idle' | 'local' | 'kasham' | 'global' | 'done';
+type LookupState = 'idle' | 'local' | 'chobo' | 'global' | 'done';
 type StockTab = 'inStock' | 'lowStock' | 'outOfStock';
 const CATEGORIES = [
     { label: 'Provisions', value: 'Provisions' },
@@ -186,8 +186,8 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
         }
 
         try {
-            // 1. Check KashAm Shared Catalogue
-            setLookupState('kasham');
+            // 1. Check Chobo Shared Catalogue
+            setLookupState('chobo');
             const res = await fetch(`${API_BASE_URL}/catalogue/lookup/${barcodeData}`);
             if (res.ok && res.status !== 204) {
                 const contentType = res.headers.get('content-type');
@@ -239,7 +239,7 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                     }
                 }
 
-                // 3. Contribute to KashAm Catalogue so others can find it
+                // 3. Contribute to Chobo Catalogue so others can find it
                 fetch(`${API_BASE_URL}/catalogue/contribute`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },

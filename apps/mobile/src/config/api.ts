@@ -1,5 +1,5 @@
 /**
- * KashAm — Backend API Configuration
+ * Chobo — Backend API Configuration
  *
  * TO TEST ON PHYSICAL DEVICE:
  *   Replace with your machine's current LAN IP address.

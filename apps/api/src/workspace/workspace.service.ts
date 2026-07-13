@@ -175,7 +175,7 @@ export class WorkspaceService {
             throw new ConflictException('This person is already an active member of this workspace');
         }
 
-        // Check if email belongs to an existing KashAm user
+        // Check if email belongs to an existing Chobo user
         const existingUser = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
         const hasGoogleAccount = existingUser ? !existingUser.password : false;
 

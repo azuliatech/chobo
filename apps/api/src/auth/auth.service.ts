@@ -15,11 +15,13 @@ import { OAuth2Client } from 'google-auth-library';
 
 const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 if (!REFRESH_SECRET) {
-    if (process.env.NODE_ENV === 'production') {
-        throw new Error('JWT_REFRESH_SECRET must be defined in production!');
-    }
+    throw new Error(
+        'JWT_REFRESH_SECRET environment variable is required in all environments.\n' +
+        'Run: node -e "console.log(require(\'crypto\').randomBytes(64).toString(\'hex\'))"\n' +
+        'and add the result to your .env file as JWT_REFRESH_SECRET=<value>'
+    );
 }
-const REFRESH_SECRET_RESOLVED = REFRESH_SECRET || 'dev-refresh-fallback-only';
+const REFRESH_SECRET_RESOLVED = REFRESH_SECRET;
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -443,6 +445,38 @@ export class AuthService {
         ]);
 
         return { success: true, message: 'Email verified successfully. You can now log in.' };
+    }
+
+    // ── Change Password ────────────────────────────────────────────────────────
+    async changePassword(userId: string, currentPassword: string, newPassword: string) {
+        const user = await this.prisma.user.findUnique({ where: { id: userId } });
+        if (!user) throw new NotFoundException('User not found');
+
+        // Google-only OAuth users have no password — they can't use this endpoint
+        if (!user.password) {
+            throw new BadRequestException(
+                'This account uses Google Sign-In and does not have a password. ' +
+                'You cannot change your password here.'
+            );
+        }
+
+        const isMatch = await bcrypt.compare(currentPassword, user.password);
+        if (!isMatch) throw new UnauthorizedException('Current password is incorrect');
+
+        if (newPassword.length < 8) {
+            throw new BadRequestException('New password must be at least 8 characters');
+        }
+        if (newPassword === currentPassword) {
+            throw new BadRequestException('New password must be different from your current password');
+        }
+
+        const hashed = await bcrypt.hash(newPassword, 12);
+        await this.prisma.user.update({
+            where: { id: userId },
+            data: { password: hashed },
+        });
+
+        return { success: true, message: 'Password updated successfully' };
     }
 
     // ── Delete Account ─────────────────────────────────────────────────────────

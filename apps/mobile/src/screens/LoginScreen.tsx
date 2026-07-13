@@ -55,19 +55,19 @@ const WALKTHROUGH_SLIDES = [
     {
         title: 'Stop losing your money to memory',
         description:
-            'Every day, little sales slip away because you forgot to write them down. KashAm tracks every single Cedi and Naira instantly, so you go home knowing your exact profit.',
+            'Every day, little sales slip away because you forgot to write them down. Chobo tracks every single Cedi and Naira instantly, so you go home knowing your exact profit.',
         icon: Wallet,
     },
     {
         title: "Never tell a customer \"It's finished\"",
         description:
-            'Turning a customer away is like throwing away money. KashAm alerts you before your fastest-moving items run empty, keeping your shelves full and your shop busy.',
+            'Turning a customer away is like throwing away money. Chobo alerts you before your fastest-moving items run empty, keeping your shelves full and your shop busy.',
         icon: Package,
     },
     {
         title: 'Get paid back without the awkward talks',
         description:
-            'Chasing customer debts feels stressful and awkward. KashAm keeps accurate, indisputable records of who owes you and lets you send polite, friendly reminders with one tap.',
+            'Chasing customer debts feels stressful and awkward. Chobo keeps accurate, indisputable records of who owes you and lets you send polite, friendly reminders with one tap.',
         icon: ShieldCheck,
     },
 ];
@@ -193,15 +193,29 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
     }, [resetToken]);
 
     // Google OAuth setup
-    const [googleRequest, googleResponse, googlePromptAsync] = Google.useIdTokenAuthRequest({
-        iosClientId: '584102283995-1n443i6ldb09h0i6rmn16qf05mpp8b8n.apps.googleusercontent.com',
-        androidClientId: '584102283995-3k1g6rnkcf21q9m7k70mpp8b8n.apps.googleusercontent.com',
-        webClientId: '584102283995-5n443i6ldb09h0i6rmn16qf05mpp8b8n.apps.googleusercontent.com',
+    const [googleRequest, googleResponse, googlePromptAsync] = Google.useAuthRequest({
+        webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+        // Android and iOS client IDs for project 1010966887103:
+        // TODO: Create Android OAuth client ID in Google Cloud Console for project 1010966887103
+        // TODO: Create iOS OAuth client ID in Google Cloud Console for project 1010966887103
+        // Until these are created, expo-auth-session will use webClientId as fallback
+        androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+        iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
     });
 
     useEffect(() => {
-        if (googleResponse?.type === 'success' && googleResponse.authentication?.idToken) {
-            handleGoogleAuth(googleResponse.authentication.idToken);
+        if (googleResponse?.type === 'success') {
+            const idToken = googleResponse.authentication?.idToken;
+            if (!idToken) {
+                setModalConfig({
+                    visible: true,
+                    type: 'error',
+                    title: 'Google sign-in failed',
+                    subtitle: 'Could not get authentication token. Please try again.',
+                });
+                return;
+            }
+            handleGoogleAuth(idToken);
         }
     }, [googleResponse]);
 
@@ -235,16 +249,16 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
                 setModalConfig({
                     visible: true,
                     type: 'error',
-                    title: 'Google Auth Failed',
-                    subtitle: data.message || 'Could not log in with Google.',
+                    title: 'Google sign-in failed',
+                    subtitle: 'Please try again or use email instead',
                 });
             }
         } catch (e) {
             setModalConfig({
                 visible: true,
                 type: 'error',
-                title: 'Connection Error',
-                subtitle: 'Could not connect to authentication server.',
+                title: 'Google sign-in failed',
+                subtitle: 'Please try again or use email instead',
             });
         } finally {
             setLoading(false);
@@ -638,7 +652,7 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
                 <View className="w-24 h-24 bg-white rounded-3xl items-center justify-center shadow-2xl shadow-black/50 mb-8">
                     <Store size={48} color="#16A34A" />
                 </View>
-                <Text className="text-white font-black text-5xl tracking-tight text-center mb-2">KashAm</Text>
+                <Text className="text-white font-black text-5xl tracking-tight text-center mb-2">Chobo</Text>
                 <Text className="text-white/80 font-bold text-base text-center max-w-[280px]">
                     Know your money. Track your stock. Never forget who owes you.
                 </Text>
@@ -754,7 +768,7 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
             </TouchableOpacity>
 
             <Text className="text-3xl font-black text-textPrimary mb-2">Create Account</Text>
-            <Text className="text-textSecondary font-bold mb-8">Register credentials for your KashAm account.</Text>
+            <Text className="text-textSecondary font-bold mb-8">Register credentials for your Chobo account.</Text>
 
             {/* Name */}
             <View className="mb-5">
@@ -1218,7 +1232,7 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
                     <View className="w-28 h-28 bg-white rounded-[32px] items-center justify-center shadow-2xl mb-6">
                         <Store size={56} color="#16A34A" />
                     </View>
-                    <Text className="text-white font-black text-5xl tracking-tight">KashAm</Text>
+                    <Text className="text-white font-black text-5xl tracking-tight">Chobo</Text>
                     <Text className="text-white/80 font-bold text-sm mt-3 uppercase tracking-widest">
                         Store POS & Stock
                     </Text>

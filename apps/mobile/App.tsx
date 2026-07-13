@@ -177,7 +177,7 @@ function MainApp() {
   const handleDeepLink = (url: string | null) => {
     if (!url) return;
     try {
-      const cleanUrl = url.replace('kasham:///', 'kasham://');
+      const cleanUrl = url.replace('chobo:///', 'chobo://');
       const parsed = new URL(cleanUrl);
       
       if (parsed.hostname === 'invite') {

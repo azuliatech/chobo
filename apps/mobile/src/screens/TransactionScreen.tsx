@@ -323,7 +323,7 @@ export default function TransactionScreen() {
 
     const handleSendReminder = async (debt: any) => {
         const dateStr = formatDate(debt.created_at);
-        const message = `Friendly reminder from ${businessName || 'KashAm Store'}:\n\nHello ${debt.customer_name}, you have an outstanding balance of ${currencySymbol}${formatAmount(debt.amount_owed).replace(currencySymbol, '')} from your purchase on ${dateStr}.\n\nPlease kindly make payments. Thank you!`;
+        const message = `Friendly reminder from ${businessName || 'Chobo'}:\n\nHello ${debt.customer_name}, you have an outstanding balance of ${currencySymbol}${formatAmount(debt.amount_owed).replace(currencySymbol, '')} from your purchase on ${dateStr}.\n\nPlease kindly make payments. Thank you!`;
         try {
             await Share.share({ message });
         } catch (error) {
@@ -460,7 +460,7 @@ export default function TransactionScreen() {
             } catch (error) {
                 console.error("View shot error:", error);
                 const lines = items.map(i => `${i.product_name} x${i.quantity} — ${currencySymbol}${formatCurrency(i.price * i.quantity, currencySymbol).replace(currencySymbol, '')}`);
-                const message = `Receipt from ${businessName || 'KashAm'}\n\n${lines.join('\n')}\n\nTotal: ${currencySymbol}${formatCurrency(transaction.total, currencySymbol).replace(currencySymbol, '')}`;
+                const message = `Receipt from ${businessName || 'Chobo'}\n\n${lines.join('\n')}\n\nTotal: ${currencySymbol}${formatCurrency(transaction.total, currencySymbol).replace(currencySymbol, '')}`;
                 Share.share({ message });
             } finally {
                 setIsCapturing(false);
@@ -1034,7 +1034,7 @@ export default function TransactionScreen() {
 
             <ReceiptView 
                 ref={receiptRef} 
-                businessName={businessName || 'KashAm Store'} 
+                businessName={businessName || 'Chobo'} 
                 transaction={sharingTx} 
                 items={sharingItems} 
                 currencySymbol={currencySymbol} 

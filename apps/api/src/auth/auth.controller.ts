@@ -101,7 +101,7 @@ export class AuthController {
             <html>
             <head>
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Reset Your KashAm Password</title>
+                <title>Reset Your Chobo Password</title>
                 <style>
                     body {
                         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -196,7 +196,7 @@ export class AuthController {
             <body>
                 <div class="card">
                     <h2>Reset Password</h2>
-                    <p style="margin-bottom: 20px;">Please enter a new password for your KashAm account.</p>
+                    <p style="margin-bottom: 20px;">Please enter a new password for your Chobo account.</p>
                     <form id="resetForm" onsubmit="handleSubmit(event)">
                         <div class="form-group">
                             <label for="password">New Password</label>
@@ -340,5 +340,16 @@ export class AuthController {
     @Delete('account')
     deleteAccount(@Request() req: any) {
         return this.authService.deleteAccount(req.user.sub);
+    }
+
+    // POST /auth/change-password
+    @UseGuards(AuthGuard)
+    @HttpCode(HttpStatus.OK)
+    @Post('change-password')
+    changePassword(@Request() req: any, @Body() body: Record<string, any>) {
+        if (!body.currentPassword || !body.newPassword) {
+            throw new BadRequestException('currentPassword and newPassword are required');
+        }
+        return this.authService.changePassword(req.user.sub, body.currentPassword, body.newPassword);
     }
 }

@@ -86,7 +86,7 @@ export const Header = ({ title, subtitle, showBell = true }: { title: string, su
             <View style={{ flex: 1, marginRight: 16 }}>
                 <View className="flex-row items-center gap-2">
                     <Text className="text-textPrimary font-black text-xl" numberOfLines={1} ellipsizeMode="tail" style={{ flexShrink: 1 }}>{title}</Text>
-                    {title === (currentStore?.shopName || 'KashAm') && (
+                    {title === (currentStore?.shopName || 'Chobo') && (
                         <TouchableOpacity 
                             onPress={() => setShowSubscriptionModal(true)}
                             className={`px-1.5 py-0.5 rounded pl-1 pr-1.5 flex-row items-center ${tier === 'PRO' ? 'bg-primary/20' : tier === 'ENTERPRISE' ? 'bg-purple-500/20' : 'bg-slate-200'}`}
@@ -532,7 +532,7 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
 
     return (
         <View className="flex-1 bg-lightBackground">
-            <Header title={businessName || 'KashAm'} subtitle="Offline ready" />
+            <Header title={businessName || 'Chobo'} subtitle="Offline ready" />
 
             {/* SEARCH & FILTERS */}
             <View className="px-6 py-4 bg-white border-b border-border z-10">
@@ -615,7 +615,7 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
                         </View>
                         <Text className="text-textPrimary font-black text-2xl mb-2">Step 1: Add your first product</Text>
                         <Text className="text-textSecondary font-bold text-sm mb-6 leading-5">
-                            Every business starts with inventory. Let's add your very first product to KashAm so you can sell it.
+                            Every business starts with inventory. Let's add your very first product to Chobo so you can sell it.
                         </Text>
                         <View className="flex-row gap-4">
                             <TouchableOpacity 
@@ -1025,7 +1025,7 @@ export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: 
                             </View>
                             <Text className="text-textPrimary font-black text-3xl text-center mb-2">🎉 Congratulations!</Text>
                             <Text className="text-textSecondary font-bold text-sm text-center mb-8 leading-6">
-                                You just made your first KashAm sale! Your inventory has been updated automatically. Now let's see your real-time business profits.
+                                You just made your first Chobo sale! Your inventory has been updated automatically. Now let's see your real-time business profits.
                             </Text>
                             <TouchableOpacity 
                                 onPress={() => {

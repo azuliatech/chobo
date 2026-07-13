@@ -273,7 +273,7 @@ export default function MoreScreen() {
                             />
                         )}
                     </View>
-                    <Text className="text-center text-textSecondary text-[10px] mt-8 font-bold">KashAm v1.0.0</Text>
+                    <Text className="text-center text-textSecondary text-[10px] mt-8 font-bold">Chobo v1.0.0</Text>
                 </View>
             </ScrollView>
 

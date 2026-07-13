@@ -16,7 +16,7 @@ describe('AppController', () => {
 
   describe('root', () => {
     it('should return operational status', () => {
-      expect(appController.getHello()).toContain('KashAm API is fully operational');
+      expect(appController.getHello()).toContain('Chobo API is fully operational');
     });
   });
 });
