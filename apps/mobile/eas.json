@@ -6,21 +6,26 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api-staging.usechobo.com/api/v1",
+        "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "xwa87g1b",
+        "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "chobo_uploads"
+      }
     },
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://kasham-api-staging.onrender.com/api/v1",
-        "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "dz1wzvee5",
+        "EXPO_PUBLIC_API_URL": "https://api-staging.usechobo.com/api/v1",
+        "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "xwa87g1b",
         "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "chobo_uploads"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://kasham-api-production.onrender.com/api/v1",
-        "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "dz1wzvee5",
+        "EXPO_PUBLIC_API_URL": "https://api.usechobo.com/api/v1",
+        "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "xwa87g1b",
         "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "chobo_uploads"
       }
     }
