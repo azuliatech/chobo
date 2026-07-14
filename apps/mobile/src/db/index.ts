@@ -1,6 +1,10 @@
 import * as SQLite from 'expo-sqlite';
 
-const db = SQLite.openDatabaseSync('kasham.db');
+// NOTE: Database renamed from kasham.db to chobo.db as part of the Chobo rebrand.
+// Existing test users will lose local SQLite data on next install.
+// For production launch, implement a migration that copies kasham.db → chobo.db on first launch.
+// TODO: Before public launch, add migration logic in initDatabase() to detect and rename the old DB file.
+const db = SQLite.openDatabaseSync('chobo.db');
 
 export async function initDatabase() {
     await db.execAsync(`PRAGMA journal_mode = WAL`);
@@ -114,6 +118,7 @@ export async function initDatabase() {
   try { await db.execAsync('ALTER TABLE notifications ADD COLUMN user_id TEXT'); } catch(e){}
   try { await db.execAsync('ALTER TABLE payment_logs ADD COLUMN user_id TEXT'); } catch(e){}
   try { await db.execAsync('ALTER TABLE products ADD COLUMN cost_price REAL DEFAULT NULL'); } catch(e){}
+  try { await db.execAsync('ALTER TABLE products ADD COLUMN category TEXT'); } catch(e){}
 
   try {
     await db.runAsync(`DELETE FROM products WHERE user_id IS NULL OR user_id = ''`);
@@ -133,23 +138,24 @@ export async function getProducts(userId: string): Promise<any[]> {
 export async function createProduct(
     id: string, name: string, price: number, stock: number,
     barcode: string | null = null, imageUri: string | null = null,
-    userId: string = '', costPrice: number | null = null
+    userId: string = '', costPrice: number | null = null,
+    category: string | null = 'others'
 ): Promise<void> {
     const now = Date.now();
     await db.runAsync(
-        'INSERT OR REPLACE INTO products (id, name, price, stock, barcode, image_uri, user_id, cost_price, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        id, name, price, stock, barcode, imageUri, userId, costPrice, now, now
+        'INSERT OR REPLACE INTO products (id, name, price, stock, barcode, image_uri, user_id, cost_price, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        id, name, price, stock, barcode, imageUri, userId, costPrice, category, now, now
     );
 }
 
 export async function updateProduct(
     id: string, name: string, price: number, stock: number,
     barcode: string | null = null, imageUri: string | null = null,
-    costPrice: number | null = null
+    costPrice: number | null = null, category: string | null = 'others'
 ): Promise<void> {
     await db.runAsync(
-        'UPDATE products SET name = ?, price = ?, stock = ?, barcode = ?, image_uri = ?, cost_price = ?, updated_at = ? WHERE id = ?',
-        name, price, stock, barcode, imageUri, costPrice, Date.now(), id
+        'UPDATE products SET name = ?, price = ?, stock = ?, barcode = ?, image_uri = ?, cost_price = ?, category = ?, updated_at = ? WHERE id = ?',
+        name, price, stock, barcode, imageUri, costPrice, category, Date.now(), id
     );
 }
 
@@ -311,10 +317,26 @@ export async function createDebt(id: string, customerId: string, amountOwed: num
 
 export async function markDebtPaid(debtId: string): Promise<void> {
     await db.runAsync(
-        'UPDATE debts SET status = "PAID", updated_at = ? WHERE id = ?',
+        'UPDATE debts SET status = "PAID", amount_owed = 0, synced = 0, updated_at = ? WHERE id = ?',
         Date.now(), debtId
     );
 }
+
+export async function recordDebtPayment(debtId: string, amountPaid: number, remainingAmount: number): Promise<void> {
+    const now = Date.now();
+    if (remainingAmount <= 0) {
+        await db.runAsync(
+            'UPDATE debts SET status = "PAID", amount_owed = 0, synced = 0, updated_at = ? WHERE id = ?',
+            now, debtId
+        );
+    } else {
+        await db.runAsync(
+            'UPDATE debts SET amount_owed = ?, synced = 0, updated_at = ? WHERE id = ?',
+            remainingAmount, now, debtId
+        );
+    }
+}
+
 
 export async function getUnpaidDebtsOlderThan(userId: string, daysOld: number): Promise<any[]> {
     const cutoff = Date.now() - daysOld * 24 * 60 * 60 * 1000;
@@ -438,6 +460,10 @@ export async function createPaymentLog(
         'INSERT INTO payment_logs (id, amount, sender_name, sender_phone, payment_method, description, notes, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         id, amount, senderName, senderPhone, paymentMethod, description, notes, userId, Date.now()
     );
+}
+
+export async function getPaymentLogs(userId: string): Promise<any[]> {
+    return await db.getAllAsync('SELECT * FROM payment_logs WHERE user_id = ? ORDER BY created_at DESC', [userId]);
 }
 
 export { db };

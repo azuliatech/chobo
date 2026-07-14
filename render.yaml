@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: kasham-api-staging
+    name: chobo-api-staging
     env: node
     plan: free
     rootDir: apps/api
@@ -13,11 +13,25 @@ services:
         value: 3000
       - key: JWT_SECRET
         generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
       - key: DATABASE_URL
-        sync: false # To be mapped to Neon staging branch connection string
+        sync: false # To be mapped to Neon staging database connection string
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false # To be mapped to Upstash URL
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false # To be mapped to Upstash Token
+      - key: RESEND_API_KEY
+        sync: false # To be mapped to Resend API key
+      - key: RESEND_FROM_EMAIL
+        sync: false # e.g., onboarding@resend.dev or chobo@resend.com
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
 
   - type: web
-    name: kasham-api-production
+    name: chobo-api-production
     env: node
     plan: free
     rootDir: apps/api
@@ -30,5 +44,19 @@ services:
         value: 3000
       - key: JWT_SECRET
         generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
       - key: DATABASE_URL
-        sync: false # To be mapped to Neon production branch connection string
+        sync: false # To be mapped to Neon production database connection string
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false

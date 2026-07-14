@@ -1,7 +1,10 @@
 import './global.css';
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, Keyboard, Modal, Linking } from 'react-native';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
 import { StatusBar } from 'expo-status-bar';
+import * as SplashScreen from 'expo-splash-screen';
 import { initDatabase, getProducts, createProduct } from './src/db';
 import SellScreen from './src/screens/SellScreen';
 import InventoryScreen from './src/screens/InventoryScreen';
@@ -9,60 +12,278 @@ import TransactionScreen from './src/screens/TransactionScreen';
 import OverviewScreen from './src/screens/OverviewScreen';
 import MoreScreen from './src/screens/MoreScreen';
 import LoginScreen from './src/screens/LoginScreen';
-import { useAuthStore } from './src/store/authStore';
+import SubscriptionScreen from './src/screens/SubscriptionScreen';
+import { useAuthStore, StoreAccess } from './src/store/authStore';
 import { useSyncStore } from './src/store/syncStore';
 import { useCurrencyStore } from './src/hooks/useCurrency';
-import { pushSalesToBackend } from './src/services/syncService';
-import { syncProductsFromBackend } from './src/services/productSyncService';
+import { pushSalesToBackend, buildHeaders } from './src/services/syncService';
 import { API_URL } from './src/config';
 import { ShoppingCart, Package, Wallet, BarChart2, Menu } from 'lucide-react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import NetInfo from '@react-native-community/netinfo';
+import HandleInviteScreen from './src/screens/HandleInviteScreen';
+import AppModal from './src/components/AppModal';
+
+// Keep splash screen visible until database and auth are initialized
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 const TABS = [
-  { key: 'sell',        label: 'Sell',        Icon: ShoppingCart },
-  { key: 'inventory',   label: 'Stock',       Icon: Package },
-  { key: 'transaction', label: 'Transaction', Icon: Wallet },
-  { key: 'overview',    label: 'Overview',    Icon: BarChart2 },
-  { key: 'more',        label: 'More',        Icon: Menu },
+  { key: 'sell',        label: 'Sell',        Icon: ShoppingCart, roles: ['OWNER', 'MANAGER', 'CASHIER'] },
+  { key: 'inventory',   label: 'Stock',       Icon: Package,      roles: ['OWNER', 'MANAGER', 'STAFF'] },
+  { key: 'transaction', label: 'Transaction', Icon: Wallet,       roles: ['OWNER', 'MANAGER'] },
+  { key: 'overview',    label: 'Overview',    Icon: BarChart2,    roles: ['OWNER', 'MANAGER'] },
+  { key: 'more',        label: 'More',        Icon: Menu,         roles: ['OWNER', 'MANAGER', 'CASHIER', 'STAFF'] },
 ];
 
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <MainApp />
+    </SafeAreaProvider>
+  );
+}
+
+function MainApp() {
   const [ready, setReady] = useState(false);
   const [activeTab, setActiveTab] = useState('sell');
-  const [initialBarcode, setInitialBarcode] = useState<string | null>(null);
+  const [inviteToken, setInviteToken] = useState<string | null>(null);
+  const [verifyToken, setVerifyToken] = useState<string | null>(null);
+  const [resetToken, setResetToken] = useState<string | null>(null);
 
-  const { token, userId, isReady: authReady, restoreToken } = useAuthStore();
+  const [initialBarcode, setInitialBarcode] = useState<string | null>(null);
+  const [isKeyboardVisible, setKeyboardVisible] = useState(false);
+
+  const [modalConfig, setModalConfig] = useState<{
+    visible: boolean;
+    type: 'success' | 'error' | 'warning' | 'info';
+    title: string;
+    subtitle?: string;
+  }>({
+    visible: false,
+    type: 'info',
+    title: '',
+  });
+
+  const { token, userId, activeStoreOwnerId, isReady: authReady, restoreToken, showSubscriptionModal, setShowSubscriptionModal, activeRole } = useAuthStore();
   const { setIsOnline, isOnline } = useSyncStore();
+  const insets = useSafeAreaInsets();
+
+  const visibleTabs = TABS.filter(tab => tab.roles.includes(activeRole ?? 'OWNER'));
+
+  useEffect(() => {
+    const isActiveTabVisible = visibleTabs.some(t => t.key === activeTab);
+    if (!isActiveTabVisible && visibleTabs.length > 0) {
+      setActiveTab(visibleTabs[0].key);
+    }
+  }, [activeRole]);
+
+  // ── Push Notifications setup ───────────────────────────────────────────────
+  useEffect(() => {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+      }),
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!token || !userId) return;
+
+    const registerPushToken = async () => {
+      try {
+        if (!Device.isDevice) return;
+
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        let finalStatus = existingStatus;
+
+        if (existingStatus !== 'granted') {
+          const { status } = await Notifications.requestPermissionsAsync();
+          finalStatus = status;
+        }
+
+        if (finalStatus !== 'granted') {
+          console.log('[Push] Permission not granted — skipping token registration');
+          return;
+        }
+
+        const pushToken = await Notifications.getExpoPushTokenAsync();
+        const expo_push_token = pushToken.data;
+
+        await fetch(`${API_URL}/auth/push-token`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ expo_push_token }),
+        });
+        console.log('[Push] Token registered:', expo_push_token);
+      } catch (e) {
+        console.warn('[Push] Token registration failed:', e);
+      }
+    };
+
+    registerPushToken();
+  }, [token, userId]);
+
+  // Background workspace refresh — runs after token restore, non-blocking
+  const refreshWorkspaces = async () => {
+    const { token, userId, activeStoreOwnerId, setStores, setActiveWorkspace } = useAuthStore.getState();
+    if (!token || !userId) return;
+    try {
+      const response = await fetch(`${API_URL}/workspaces/mine`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+
+      const mapped: StoreAccess[] = (data || []).map((w: any) => ({
+        ownerId: w.workspaceId,
+        shopName: w.name,
+        role: w.role,
+        status: w.status,
+        tier: w.tier,
+      }));
+
+      setStores(mapped);
+
+      const stillActive = mapped.find(w => w.ownerId === activeStoreOwnerId);
+      if (!stillActive && mapped.length > 0) {
+        await setActiveWorkspace(mapped[0]);
+      }
+    } catch {
+      // Non-blocking — use cached data
+    }
+  };
 
   useEffect(() => {
     initDatabase()
       .then(() => useCurrencyStore.getState().initCurrency())
       .then(() => restoreToken())
-      .then(() => setReady(true))
-      .catch(console.error);
+      .then(async () => {
+        setReady(true);
+        await SplashScreen.hideAsync().catch(() => {});
+        refreshWorkspaces();
+      })
+      .catch(async (e) => {
+        console.error(e);
+        await SplashScreen.hideAsync().catch(() => {});
+      });
   }, []);
 
-  // Network listener using NetInfo for real-time updates
+  // ── Deep Link Handler ────────────────────────────────────────────────────────
+  const handleDeepLink = (url: string | null) => {
+    if (!url) return;
+    try {
+      const cleanUrl = url.replace('chobo:///', 'chobo://');
+      const parsed = new URL(cleanUrl);
+      
+      if (parsed.hostname === 'invite') {
+        const token = parsed.searchParams.get('token');
+        if (token) setInviteToken(token);
+      } else if (parsed.hostname === 'verify') {
+        const token = parsed.searchParams.get('token');
+        if (token) setVerifyToken(token);
+      } else if (parsed.hostname === 'reset-password') {
+        const token = parsed.searchParams.get('token');
+        if (token) setResetToken(token);
+      }
+    } catch (err) {
+      if (url.includes('verify?token=')) {
+        const token = url.split('token=')[1];
+        if (token) setVerifyToken(token);
+      } else if (url.includes('reset-password?token=')) {
+        const token = url.split('token=')[1];
+        if (token) setResetToken(token);
+      } else if (url.includes('invite?token=')) {
+        const token = url.split('token=')[1];
+        if (token) setInviteToken(token);
+      }
+    }
+  };
+
+  useEffect(() => {
+    Linking.getInitialURL().then(handleDeepLink).catch(() => {});
+    const subscription = Linking.addEventListener('url', ({ url }) => handleDeepLink(url));
+    return () => subscription.remove();
+  }, []);
+
+  // Trigger email verification from deep link
+  useEffect(() => {
+    if (!verifyToken) return;
+    const verify = async () => {
+      try {
+        const res = await fetch(`${API_URL}/auth/verify-email?token=${verifyToken}`);
+        const data = await res.json();
+        if (res.ok) {
+          setModalConfig({
+            visible: true,
+            type: 'success',
+            title: 'Email Verified',
+            subtitle: data.message || 'Your email has been verified successfully. You can now log in.',
+          });
+        } else {
+          setModalConfig({
+            visible: true,
+            type: 'error',
+            title: 'Verification Failed',
+            subtitle: data.message || 'The verification link is invalid or expired.',
+          });
+        }
+      } catch (e) {
+        setModalConfig({
+          visible: true,
+          type: 'error',
+          title: 'Connection Error',
+          subtitle: 'Could not connect to verification server.',
+        });
+      } finally {
+        setVerifyToken(null);
+      }
+    };
+    verify();
+  }, [verifyToken]);
+
+  useEffect(() => {
+    if (token) {
+      setActiveTab('sell');
+    }
+  }, [token]);
+
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener(
+      'keyboardDidShow',
+      () => setKeyboardVisible(true)
+    );
+    const keyboardDidHideListener = Keyboard.addListener(
+      'keyboardDidHide',
+      () => setKeyboardVisible(false)
+    );
+
+    return () => {
+      keyboardDidShowListener.remove();
+      keyboardDidHideListener.remove();
+    };
+  }, []);
+
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(state => {
-      // isInternetReachable can be null on first run, so we check isConnected first
       setIsOnline(!!state.isConnected && state.isInternetReachable !== false);
     });
     return () => unsubscribe();
   }, [setIsOnline]);
 
-  // Sync worker — only runs when authenticated AND online
   useEffect(() => {
     if (isOnline && token && userId) {
-      // Automatic restore if local DB is empty
       const restoreIfNeeded = async () => {
         try {
           const localProducts = await getProducts(userId);
           if (localProducts.length === 0) {
             console.log('[Restore] Local DB empty, attempting restore...');
             const response = await fetch(`${API_URL}/user-products/restore`, {
-              headers: { 'Authorization': `Bearer ${token}` },
+              headers: buildHeaders(token, activeStoreOwnerId),
             });
 
             if (response.ok) {
@@ -96,7 +317,6 @@ export default function App() {
     }
   }, [isOnline, token, userId]);
 
-  // Cross-screen barcode handoff (SellScreen → InventoryScreen)
   const navigateToStock = (barcode: string) => {
     setInitialBarcode(barcode);
     setActiveTab('inventory');
@@ -104,43 +324,45 @@ export default function App() {
   const clearInitialBarcode = () => setInitialBarcode(null);
 
   if (!ready || !authReady) {
-    return (
-      <View style={styles.loading}>
-        <ActivityIndicator size="large" color="#16A34A" />
-        <Text style={styles.loadingText}>Loading KashAm...</Text>
-      </View>
-    );
+    return null;
   }
 
   if (!token) {
     return (
-      <SafeAreaProvider>
+      <View style={{ flex: 1 }}>
         <StatusBar style="dark" />
-        <LoginScreen />
-      </SafeAreaProvider>
+        <LoginScreen resetToken={resetToken} onClearResetToken={() => setResetToken(null)} />
+        <AppModal
+          visible={modalConfig.visible}
+          type={modalConfig.type}
+          title={modalConfig.title}
+          subtitle={modalConfig.subtitle}
+          onDismiss={() => setModalConfig(prev => ({ ...prev, visible: false }))}
+        />
+      </View>
     );
   }
 
   const renderScreen = () => {
     switch (activeTab) {
-      case 'sell':        return <SellScreen onNavigateToStock={navigateToStock} />;
+      case 'sell':        return <SellScreen onNavigateToStock={navigateToStock} onNavigateToOverview={() => setActiveTab('overview')} />;
       case 'inventory':   return <InventoryScreen initialBarcode={initialBarcode} onClearBarcode={clearInitialBarcode} />;
       case 'transaction': return <TransactionScreen />;
-      case 'overview':    return <OverviewScreen />;
+      case 'overview':    return <OverviewScreen onNavigateToSell={() => setActiveTab('sell')} />;
       case 'more':        return <MoreScreen />;
       default:            return <SellScreen onNavigateToStock={navigateToStock} />;
     }
   };
 
   return (
-    <SafeAreaProvider>
-      <View style={styles.container}>
-        <StatusBar style="dark" />
-        {renderScreen()}
+    <View style={styles.container}>
+      <StatusBar style="dark" />
+      {renderScreen()}
 
-        {/* Bottom Tab Bar */}
-        <View style={styles.tabBar}>
-          {TABS.map(tab => {
+      {/* Bottom Tab Bar */}
+      {!isKeyboardVisible && (
+        <View style={[styles.tabBar, { paddingBottom: insets.bottom + 8 }]}>
+          {visibleTabs.map(tab => {
             const active = activeTab === tab.key;
             const IconComponent = tab.Icon;
             return (
@@ -163,21 +385,56 @@ export default function App() {
             );
           })}
         </View>
-      </View>
-    </SafeAreaProvider>
+      )}
+
+      <Modal
+        visible={showSubscriptionModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowSubscriptionModal(false)}
+      >
+        <SubscriptionScreen onBack={() => setShowSubscriptionModal(false)} />
+      </Modal>
+
+      {/* ── Invite Deep Link Modal ── */}
+      <Modal
+        visible={!!inviteToken}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setInviteToken(null)}
+      >
+        {inviteToken ? (
+          <HandleInviteScreen
+            inviteToken={inviteToken}
+            onClose={() => setInviteToken(null)}
+            onLoginRequired={() => {
+              setInviteToken(null);
+            }}
+            onRegisterRequired={() => {
+              setInviteToken(null);
+            }}
+          />
+        ) : null}
+      </Modal>
+
+      <AppModal
+        visible={modalConfig.visible}
+        type={modalConfig.type}
+        title={modalConfig.title}
+        subtitle={modalConfig.subtitle}
+        onDismiss={() => setModalConfig(prev => ({ ...prev, visible: false }))}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container:   { flex: 1, backgroundColor: '#F8FAFC' },
-  loading:     { flex: 1, backgroundColor: '#0f172a', alignItems: 'center', justifyContent: 'center' },
-  loadingText: { color: '#94a3b8', marginTop: 12, fontSize: 16 },
   tabBar: {
     flexDirection: 'row',
     backgroundColor: '#ffffff',
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
-    paddingBottom: Platform.OS === 'ios' ? 24 : 8,
     paddingTop: 8,
   },
   tab:           { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 4 },

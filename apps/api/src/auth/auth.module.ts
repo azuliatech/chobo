@@ -1,18 +1,30 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
+import { EmailService } from './email.service';
 import { JwtModule } from '@nestjs/jwt';
+import { RolesGuard } from './roles.guard';
+import { PrismaModule } from '../prisma/prisma.module';
+import { WorkspaceModule } from '../workspace/workspace.module';
 
 @Module({
   imports: [
     JwtModule.register({
       global: true,
-      secret: process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? (() => { throw new Error('JWT_SECRET must be defined in production!'); })() : 'super-secret-jwt-key'),
-      signOptions: { expiresIn: '7d' },
+      secret:
+        process.env.JWT_SECRET ||
+        (process.env.NODE_ENV === 'production'
+          ? (() => {
+              throw new Error('JWT_SECRET must be defined in production!');
+            })()
+          : 'dev-jwt-secret-only'),
+      signOptions: { expiresIn: '15m' }, // short-lived access tokens
     }),
+    PrismaModule,
+    forwardRef(() => WorkspaceModule),  // ← forward ref to break circular dep
   ],
-  providers: [AuthService],
+  providers: [AuthService, EmailService, RolesGuard],
   controllers: [AuthController],
-  exports: [AuthService],
+  exports: [AuthService, EmailService, RolesGuard],
 })
-export class AuthModule { }
+export class AuthModule {}

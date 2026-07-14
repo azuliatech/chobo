@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import * as LocalAuthentication from 'expo-local-authentication';
-import * as SecureStore from 'expo-secure-store';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     View, Text, TouchableOpacity, Modal, Image, TextInput, ScrollView,
-    Platform, UIManager, Alert, Dimensions, ActivityIndicator, Share, KeyboardAvoidingView
+    Platform, UIManager, Dimensions, ActivityIndicator, Share, KeyboardAvoidingView, Vibration
 } from 'react-native';
+import { Audio } from 'expo-av';
+import * as Haptics from 'expo-haptics';
 import {
     getProducts, 
     createSale, 
@@ -15,8 +15,10 @@ import {
     getFrequentlySoldProducts,
     getNotifications,
     createNotification,
-    notificationExistsForRelated
+    notificationExistsForRelated,
+    createProduct
 } from '../db';
+import AppModal from '../components/AppModal';
 import { useAuthStore } from '../store/authStore';
 import { useCurrency } from '../hooks/useCurrency';
 import { useCartStore, PaymentType } from '../store/cartStore';
@@ -43,15 +45,16 @@ import {
     ArrowLeftRight,
     Clock,
     Pencil,
-    Fingerprint,
     PackageSearch,
-    Package
+    Package,
+    Sparkles
 } from 'lucide-react-native';
 import { useSyncStore } from '../store/syncStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatCurrency, getInitials } from '../utils/format';
 import NotificationsSheet from '../components/NotificationsSheet';
 import AddProductSheet from '../components/AddProductSheet';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -64,9 +67,12 @@ const ITEM_WIDTH = (width - 48 - 16) / 2; // 2 columns, 24px padding sides, 16px
 export const Header = ({ title, subtitle, showBell = true }: { title: string, subtitle?: string, showBell?: boolean }) => {
     const insets = useSafeAreaInsets();
     const { isOnline } = useSyncStore();
-    const { userId } = useAuthStore();
+    const { userId, activeStoreOwnerId, stores, setShowSubscriptionModal } = useAuthStore();
     const [unreadCount, setUnreadCount] = useState(0);
     const [sheetVisible, setSheetVisible] = useState(false);
+
+    const currentStore = stores.find(s => s.ownerId === activeStoreOwnerId);
+    const tier = currentStore?.tier || 'FREE';
 
     useEffect(() => {
         if (!showBell || !userId) return;
@@ -77,11 +83,22 @@ export const Header = ({ title, subtitle, showBell = true }: { title: string, su
 
     return (
         <View style={{ paddingTop: insets.top + 4 }} className="bg-white px-6 pb-2 border-b border-border flex-row items-center justify-between z-50">
-            <View>
-                {/* TODO: Fetch store name from onboarding context */}
-                <Text className="text-textPrimary font-black text-xl">{title}</Text>
+            <View style={{ flex: 1, marginRight: 16 }}>
+                <View className="flex-row items-center gap-2">
+                    <Text className="text-textPrimary font-black text-xl" numberOfLines={1} ellipsizeMode="tail" style={{ flexShrink: 1 }}>{title}</Text>
+                    {title === (currentStore?.shopName || 'Chobo') && (
+                        <TouchableOpacity 
+                            onPress={() => setShowSubscriptionModal(true)}
+                            className={`px-1.5 py-0.5 rounded pl-1 pr-1.5 flex-row items-center ${tier === 'PRO' ? 'bg-primary/20' : tier === 'ENTERPRISE' ? 'bg-purple-500/20' : 'bg-slate-200'}`}
+                        >
+                            <Text className={`text-[8px] font-black uppercase tracking-widest ${tier === 'PRO' ? 'text-primary' : tier === 'ENTERPRISE' ? 'text-purple-600' : 'text-slate-600'}`}>
+                                {tier}
+                            </Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
                 {subtitle && subtitle !== 'Offline ready' ? (
-                     <Text className="text-textSecondary text-[10px] font-bold uppercase tracking-tight">{subtitle}</Text>
+                     <Text className="text-textSecondary text-[10px] font-bold uppercase tracking-tight" numberOfLines={1} ellipsizeMode="tail">{subtitle}</Text>
                 ) : null}
             </View>
             <View className="flex-row items-center gap-4">
@@ -106,13 +123,17 @@ export const Header = ({ title, subtitle, showBell = true }: { title: string, su
 };
 
 // --- MAIN SCREEN ---
-export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: (barcode: string) => void }) {
+export default function SellScreen({ onNavigateToStock, onNavigateToOverview }: { onNavigateToStock?: (barcode: string) => void; onNavigateToOverview?: () => void }) {
     const { userId, businessName } = useAuthStore();
     const { symbol: currencySymbol, formatAmount } = useCurrency();
     const [products, setProducts] = useState<any[]>([]);
     const [frequentProducts, setFrequentProducts] = useState<any[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [filteredProducts, setFilteredProducts] = useState<any[]>([]);
+    
+    // Onboarding States
+    const [hasFirstSaleCompleted, setHasFirstSaleCompleted] = useState<boolean>(true);
+    const [celebrationVisible, setCelebrationVisible] = useState(false);
     
     // Scanner State
     const [scannerVisible, setScannerVisible] = useState(false);
@@ -124,8 +145,17 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
     const [miniProductName, setMiniProductName] = useState('');
     const [miniProductPrice, setMiniProductPrice] = useState('');
     
-    // Biometric Prompt State
-    const [biometricPromptVisible, setBiometricPromptVisible] = useState(false);
+    // Custom AppModal State
+    const [modalConfig, setModalConfig] = useState<{
+        visible: boolean;
+        type: 'success' | 'error' | 'warning' | 'info';
+        title: string;
+        subtitle?: string;
+    }>({
+        visible: false,
+        type: 'info',
+        title: '',
+    });
     
     // Checkout State
     const [checkoutVisible, setCheckoutVisible] = useState(false);
@@ -139,9 +169,12 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
     // Total override and Customer Info
     const [customerName, setCustomerName] = useState('');
     const [customerPhone, setCustomerPhone] = useState('');
+    const [customerNameError, setCustomerNameError] = useState('');
     const [finalPaidAmount, setFinalPaidAmount] = useState('');
     const [totalEditMode, setTotalEditMode] = useState(false);
     const [saleLoading, setSaleLoading] = useState(false);
+
+    const soundRef = useRef<Audio.Sound | null>(null);
 
     const [permission, requestPermission] = useCameraPermissions();
     const { items, total, addItem, updateQuantity, clearCart } = useCartStore();
@@ -163,21 +196,11 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
     useEffect(() => { loadData(); }, [loadData]);
 
     useEffect(() => {
-        const checkBiometricPrompt = async () => {
-            const hasPrompted = await SecureStore.getItemAsync('hasPromptedBiometric');
-            if (hasPrompted === 'true') return;
-
-            const enabled = await SecureStore.getItemAsync('biometricEnabled');
-            if (enabled === 'true') return;
-
-            const compatible = await LocalAuthentication.hasHardwareAsync();
-            const enrolled = await LocalAuthentication.isEnrolledAsync();
-
-            if (compatible && enrolled) {
-                setBiometricPromptVisible(true);
-            }
+        const checkFirstSale = async () => {
+            const val = await AsyncStorage.getItem('hasFirstSaleCompleted');
+            setHasFirstSaleCompleted(val === 'true');
         };
-        setTimeout(checkBiometricPrompt, 1000);
+        checkFirstSale();
     }, []);
 
     useEffect(() => {
@@ -203,13 +226,15 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
             if (userId) {
                 await SecureStore.setItemAsync('biometricUserId', userId);
             }
-            Alert.alert('Success', 'Biometric login enabled!');
+            setModalConfig({
+                visible: true,
+                type: 'success',
+                title: 'Success',
+                subtitle: 'Biometric login enabled!',
+            });
+            await SecureStore.setItemAsync('hasPromptedBiometric', 'true');
+            setBiometricPromptVisible(false);
         }
-        await SecureStore.setItemAsync('hasPromptedBiometric', 'true');
-        setBiometricPromptVisible(false);
-    };
-
-    const handleDeclineBiometric = async () => {
         await SecureStore.setItemAsync('hasPromptedBiometric', 'true');
         setBiometricPromptVisible(false);
     };
@@ -217,7 +242,20 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
     const handleProductPress = (product: any) => {
         const cartItem = items.find(i => i.productId === product.id);
         const inCartQty = cartItem ? cartItem.quantity : 0;
-        if (product.stock - inCartQty <= 0) return; // Prevent adding if no stock
+        const remainingStock = product.stock - inCartQty;
+
+        if (remainingStock <= 0) {
+            setModalConfig({
+                visible: true,
+                type: 'warning',
+                title: 'Out of Stock',
+                subtitle: `Product "${product.name}" is currently out of stock. Please restock it.`,
+            });
+            return;
+        }
+
+        // Haptic vibration feedback on product tap
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
         addItem(product);
     };
 
@@ -226,9 +264,17 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
         if (!item) return;
         
         const product = products.find(p => p.id === productId);
+        if (product && delta > 0 && item.quantity >= product.stock) {
+            setModalConfig({
+                visible: true,
+                type: 'warning',
+                title: 'Stock Limit Reached',
+                subtitle: `Cannot add more "${product.name}". Only ${product.stock} items are in stock.`,
+            });
+            return;
+        }
+
         const newQty = item.quantity + delta;
-        if (delta > 0 && product && product.stock - newQty < 0) return; // Stock check
-        
         updateQuantity(productId, newQty);
     };
 
@@ -245,10 +291,39 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
         if (scanned) return;
         setScanned(true);
 
-        const match = products.find(p => p.barcode === data);
+        const match = products.find(p => p.barcode && p.barcode.trim() === data.trim());
         if (match) {
+            const cartItem = items.find(i => i.productId === match.id);
+            const inCartQty = cartItem ? cartItem.quantity : 0;
+            const remainingStock = match.stock - inCartQty;
+
+            if (remainingStock <= 0) {
+                setScannerVisible(false);
+                setModalConfig({
+                    visible: true,
+                    type: 'warning',
+                    title: 'Out of Stock',
+                    subtitle: `Scanned product "${match.name}" is out of stock.`,
+                });
+                return;
+            }
             handleProductPress(match);
-            // Alert.alert('Added', `${match.name} added to cart`, [{ text: 'OK', onPress: () => setScanned(false) }]);
+            // Play ping sound on successful scan
+            (async () => {
+                try {
+                    await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+                    const { sound } = await Audio.Sound.createAsync(
+                        { uri: 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg' },
+                        { shouldPlay: true, volume: 0.7 }
+                    );
+                    soundRef.current = sound;
+                    sound.setOnPlaybackStatusUpdate((status: any) => {
+                        if (status.didJustFinish) sound.unloadAsync();
+                    });
+                } catch (e) {
+                    // Sound not critical — fail silently
+                }
+            })();
             // Auto-reset scan after 1.5s for continuous scanning
             setTimeout(() => setScanned(false), 1500);
         } else {
@@ -304,16 +379,29 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
             loadData();
         } catch (e) {
             console.warn('Mini save failed', e);
-            Alert.alert('Error', 'Could not quick-add product');
+            setModalConfig({
+                visible: true,
+                type: 'error',
+                title: 'Error',
+                subtitle: 'Could not quick-add product',
+            });
         }
     };
 
     const executeSale = async (method: PaymentType) => {
         if (method === 'PAY_LATER' && !customerName.trim()) {
-            Alert.alert('Required', 'Customer Name is required for Pay Later sales.');
+            setCustomerNameError('Customer name is required for Pay Later sales');
             return;
         }
-        if (!userId) { Alert.alert('Error', 'Not logged in'); return; }
+        if (!userId) {
+            setModalConfig({
+                visible: true,
+                type: 'error',
+                title: 'Error',
+                subtitle: 'Not logged in',
+            });
+            return;
+        }
 
         try {
             setSaleLoading(true);
@@ -355,12 +443,26 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
             setCheckoutVisible(false);
             setCustomerName('');
             setCustomerPhone('');
+            setCustomerNameError('');
             setSelectedPaymentType(null);
             loadData();
             setTimeout(() => setSuccessVisible(false), 2000);
+
+            if (!hasFirstSaleCompleted) {
+                await AsyncStorage.setItem('hasFirstSaleCompleted', 'true');
+                setHasFirstSaleCompleted(true);
+                setTimeout(() => {
+                    setCelebrationVisible(true);
+                }, 2200);
+            }
         } catch (e) {
             console.error('Sale error', e);
-            Alert.alert('Error', 'Could not record sale');
+            setModalConfig({
+                visible: true,
+                type: 'error',
+                title: 'Error',
+                subtitle: 'Could not record sale',
+            });
         } finally {
             setSaleLoading(false);
         }
@@ -390,9 +492,15 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
         return (
             <TouchableOpacity 
                 onPress={() => handleProductPress(item)}
-                disabled={isOutOfStock}
                 style={{ width: ITEM_WIDTH }}
-                className={`bg-white rounded-2xl p-4 mb-4 ${isSelected ? 'border-2 border-primary bg-primaryLight/30' : 'border border-border'} ${isOutOfStock ? 'opacity-50' : ''}`}
+                className={`rounded-2xl p-4 mb-4 ${
+                    isOutOfStock 
+                        ? 'bg-slate-100 border border-slate-200 opacity-60' 
+                        : isSelected 
+                            ? 'bg-primaryLight/30 border-2 border-primary' 
+                            : 'bg-white border border-border'
+                }`}
+                activeOpacity={isOutOfStock ? 1 : 0.7}
             >
                 {isSelected && (
                     <View className="absolute -top-2 -right-2 bg-primary min-w-[24px] h-[24px] rounded-full items-center justify-center z-10 border-2 border-white px-1">
@@ -401,16 +509,16 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
                 )}
 
                 <View className="w-full aspect-square rounded-2xl overflow-hidden mb-3 bg-lightBackground">
-                                    {item.image_uri ? (
-                    <Image source={{ uri: item.image_uri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                ) : (
-                    <View className="w-full h-full items-center justify-center bg-primaryLight">
-                        <Text className="text-primaryDark font-bold text-xl">{getInitials(item.name)}</Text>
-                    </View>
-                )}
+                    {item.image_uri ? (
+                        <Image source={{ uri: item.image_uri }} className={`w-full h-full ${isOutOfStock ? 'grayscale' : ''}`} resizeMode="cover" />
+                    ) : (
+                        <View className={`w-full h-full items-center justify-center ${isOutOfStock ? 'bg-slate-200' : 'bg-primaryLight'}`}>
+                            <Text className={`${isOutOfStock ? 'text-slate-400' : 'text-primaryDark'} font-bold text-xl`}>{getInitials(item.name)}</Text>
+                        </View>
+                    )}
                 </View>
-                <Text className="font-bold text-sm text-textPrimary text-center mb-1" numberOfLines={2}>{item.name}</Text>
-                <Text className="text-primary font-black text-base text-center mb-2">{formatAmount(item.price)}</Text>
+                <Text className={`font-bold text-sm text-center mb-1 ${isOutOfStock ? 'text-slate-400' : 'text-textPrimary'}`} numberOfLines={2}>{item.name}</Text>
+                <Text className={`font-black text-base text-center mb-2 ${isOutOfStock ? 'text-slate-400' : 'text-primary'}`}>{formatAmount(item.price)}</Text>
                 
                 <View className="flex-row items-center justify-center gap-1.5 mt-auto">
                     <View className="w-2 h-2 rounded-full" style={{ backgroundColor: dotColor }} />
@@ -424,7 +532,7 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
 
     return (
         <View className="flex-1 bg-lightBackground">
-            <Header title={businessName || 'KashAm'} subtitle="Offline ready" />
+            <Header title={businessName || 'Chobo'} subtitle="Offline ready" />
 
             {/* SEARCH & FILTERS */}
             <View className="px-6 py-4 bg-white border-b border-border z-10">
@@ -450,6 +558,17 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
             </View>
 
             <ScrollView className="flex-1" contentContainerStyle={{ padding: 24, paddingBottom: 150 }}>
+                {/* Step 2 Onboarding Banner */}
+                {products.length > 0 && !hasFirstSaleCompleted && (
+                    <View className="bg-primary p-4 rounded-2xl flex-row items-center justify-between mb-6 shadow-sm border border-primary/20">
+                        <View className="flex-1 mr-4">
+                            <Text className="text-white font-black text-sm">Step 2: Let's make your first sale!</Text>
+                            <Text className="text-white/80 font-bold text-xs mt-1">Tap your product card below to add it to the cart, then tap Checkout.</Text>
+                        </View>
+                        <Sparkles size={20} color="white" />
+                    </View>
+                )}
+
                 {/* FREQUENTLY SOLD */}
                 {frequentProducts.length > 0 && !searchQuery && (
                     <View style={{ backgroundColor: '#16A34A' }} className="rounded-2xl p-4 mb-6">
@@ -488,7 +607,36 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
                     {filteredProducts.map(item => <React.Fragment key={item.id}>{renderProductCard({item})}</React.Fragment>)}
                 </View>
                 
-                {filteredProducts.length === 0 && (
+                {/* Onboarding Step 1 Empty State */}
+                {products.length === 0 ? (
+                    <View className="bg-white rounded-[32px] p-6 border border-border shadow-sm my-6">
+                        <View className="bg-[#DCFCE7] w-12 h-12 rounded-2xl items-center justify-center mb-4">
+                            <Package size={24} color="#16A34A" />
+                        </View>
+                        <Text className="text-textPrimary font-black text-2xl mb-2">Step 1: Add your first product</Text>
+                        <Text className="text-textSecondary font-bold text-sm mb-6 leading-5">
+                            Every business starts with inventory. Let's add your very first product to Chobo so you can sell it.
+                        </Text>
+                        <View className="flex-row gap-4">
+                            <TouchableOpacity 
+                                onPress={() => onNavigateToStock?.('')}
+                                className="flex-1 bg-primary py-3.5 rounded-xl items-center flex-row justify-center shadow-sm active:bg-[#15803D]"
+                            >
+                                <ScanLine size={16} color="white" style={{ marginRight: 8 }} />
+                                <Text className="text-white font-black text-xs">Scan Barcode</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                onPress={() => setAddProductVisible(true)}
+                                className="flex-1 bg-lightBackground border border-border py-3.5 rounded-xl items-center flex-row justify-center active:bg-border/20"
+                            >
+                                <Plus size={16} color="#0F172A" style={{ marginRight: 8 }} />
+                                <Text className="text-textPrimary font-black text-xs">Add Manually</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                ) : null}
+
+                {products.length > 0 && filteredProducts.length === 0 && (
                     <View className="items-center justify-center py-12">
                         <Search size={40} color="#CBD5E1" />
                         <Text className="text-textSecondary font-bold mt-4">No products found</Text>
@@ -634,7 +782,10 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
             {/* MINI ADD SHEET */}
             <Modal visible={showMiniAddSheet} transparent animationType="slide">
                 <View className="flex-1 bg-black/60 justify-end">
-                    <View className="bg-white rounded-t-[40px] p-6 pb-12">
+                    <KeyboardAvoidingView
+                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                        className="bg-white rounded-t-[40px] p-6 pb-12"
+                    >
                         <View className="w-12 h-1.5 bg-border rounded-full self-center mb-6" />
                         <Text className="text-xl font-black text-textPrimary mb-6">Quick Add Product</Text>
                         
@@ -679,9 +830,17 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
                         >
                             <Text className="text-textSecondary font-bold">Cancel</Text>
                         </TouchableOpacity>
-                    </View>
+                    </KeyboardAvoidingView>
                 </View>
             </Modal>
+
+            <AppModal
+                visible={modalConfig.visible}
+                type={modalConfig.type}
+                title={modalConfig.title}
+                subtitle={modalConfig.subtitle}
+                onDismiss={() => setModalConfig(prev => ({ ...prev, visible: false }))}
+            />
 
             {/* ADD PRODUCT SHEET (Overlay) */}
             <AddProductSheet 
@@ -705,63 +864,72 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
 
                         <ScrollView className="flex-1 p-6" showsVerticalScrollIndicator={false}>
                             {/* ITEM LIST WITH PRICE OVERRIDE */}
-                            {items.map(item => (
-                                <View key={item.productId} className="flex-row items-center justify-between mb-4 bg-white border border-border p-4 rounded-3xl shadow-sm">
-                                    <View className="flex-row items-center flex-1 pr-4">
-                                        <View className="w-10 h-10 rounded-full bg-lightBackground items-center justify-center mr-3 border border-border/50">
-                                            <Text className="text-textPrimary font-black text-sm">{getInitials(item.name)}</Text>
+                            {items.map(item => {
+                                const product = products.find((p: any) => p.id === item.productId);
+                                return (
+                                    <View key={item.productId} className="flex-row items-center justify-between mb-4 bg-white border border-border p-4 rounded-3xl shadow-sm">
+                                        <View className="flex-row items-center flex-1 pr-4">
+                                            <View className="w-10 h-10 rounded-full bg-lightBackground items-center justify-center mr-3 border border-border/50 overflow-hidden">
+                                                {product?.image_uri ? (
+                                                    <Image source={{ uri: product.image_uri }} className="w-full h-full" resizeMode="cover" />
+                                                ) : (
+                                                    <Text className="text-textPrimary font-black text-xs">{getInitials(item.name)}</Text>
+                                                )}
+                                            </View>
+                                            <View className="flex-1">
+                                                <Text className="font-bold text-sm text-textPrimary mb-1" numberOfLines={2}>{item.name}</Text>
+                                                {/* Price Edit Logic */}
+                                                {editingPriceId === item.productId ? (
+                                                    <TextInput placeholderTextColor="#94A3B8" 
+                                                        autoFocus
+                                                        className="text-primary font-black text-sm border-b border-primary p-0 m-0 w-20"
+                                                        keyboardType="numeric"
+                                                        value={tempPrice}
+                                                        onChangeText={setTempPrice}
+                                                        onBlur={() => {
+                                                            const p = parseFloat(tempPrice);
+                                                            updateQuantity(item.productId, item.quantity, isNaN(p) ? item.price : p);
+                                                            setEditingPriceId(null);
+                                                        }}
+                                                    />
+                                                ) : (
+                                                    <TouchableOpacity className="flex-row items-center gap-1.5" onPress={() => { setEditingPriceId(item.productId); setTempPrice(item.price.toString()); }}>
+                                                        {item.price !== (product?.price ?? item.price) && (
+                                                            <Text className="text-textSecondary text-xs line-through">
+                                                                {formatAmount(product?.price ?? 0)}
+                                                            </Text>
+                                                        )}
+                                                        <Text className="text-primary font-black text-sm">{formatAmount(item.price)}</Text>
+                                                        <View className="bg-lightBackground p-1 rounded-full">
+                                                            <Pencil size={10} color="#64748B" />
+                                                        </View>
+                                                    </TouchableOpacity>
+                                                )}
+                                            </View>
                                         </View>
-                                        <View className="flex-1">
-                                            <Text className="font-bold text-sm text-textPrimary mb-1" numberOfLines={2}>{item.name}</Text>
-                                            {/* Price Edit Logic */}
-                                            {editingPriceId === item.productId ? (
-                                                <TextInput placeholderTextColor="#94A3B8" 
-                                                    autoFocus
-                                                    className="text-primary font-black text-sm border-b border-primary p-0 m-0 w-20"
-                                                    keyboardType="numeric"
-                                                    value={tempPrice}
-                                                    onChangeText={setTempPrice}
-                                                    onBlur={() => {
-                                                        const p = parseFloat(tempPrice);
-                                                        updateQuantity(item.productId, item.quantity, isNaN(p) ? item.price : p);
-                                                        setEditingPriceId(null);
-                                                    }}
-                                                />
-                                            ) : (
-                                                <TouchableOpacity className="flex-row items-center gap-1.5" onPress={() => { setEditingPriceId(item.productId); setTempPrice(item.price.toString()); }}>
-                                                    {item.price !== (products.find((p: any)=>p.id===item.productId)?.price ?? item.price) && (
-                                                        <Text className="text-textSecondary text-xs line-through">
-                                                            {currencySymbol}{products.find((p: any)=>p.id===item.productId)?.price ?? ''}
-                                                        </Text>
-                                                    )}
-                                                    <Text className="text-primary font-black text-sm">{currencySymbol}{item.price}</Text>
-                                                    <View className="bg-lightBackground p-1 rounded-full">
-                                                        <Pencil size={10} color="#64748B" />
-                                                    </View>
-                                                </TouchableOpacity>
-                                            )}
+                                        
+                                        <View className="flex-row items-center bg-lightBackground rounded-full border border-border p-1">
+                                            <TouchableOpacity onPress={() => handleUpdateQuantity(item.productId, -1)} className="w-8 h-8 rounded-full bg-danger items-center justify-center shadow-sm">
+                                                <Minus size={16} color="white" />
+                                            </TouchableOpacity>
+                                            <Text className="font-black text-sm w-8 text-center text-textPrimary">{item.quantity}</Text>
+                                            <TouchableOpacity onPress={() => handleUpdateQuantity(item.productId, 1)} className="w-8 h-8 rounded-full bg-primary items-center justify-center shadow-sm">
+                                                <Plus size={16} color="white" />
+                                            </TouchableOpacity>
                                         </View>
                                     </View>
-                                    
-                                    <View className="flex-row items-center bg-lightBackground rounded-full border border-border p-1">
-                                        <TouchableOpacity onPress={() => handleUpdateQuantity(item.productId, -1)} className="w-8 h-8 rounded-full bg-danger items-center justify-center shadow-sm">
-                                            <Minus size={16} color="white" />
-                                        </TouchableOpacity>
-                                        <Text className="font-black text-sm w-8 text-center text-textPrimary">{item.quantity}</Text>
-                                        <TouchableOpacity onPress={() => handleUpdateQuantity(item.productId, 1)} className="w-8 h-8 rounded-full bg-primary items-center justify-center shadow-sm">
-                                            <Plus size={16} color="white" />
-                                        </TouchableOpacity>
-                                    </View>
-                                </View>
-                            ))}
+                                );
+                            })}
 
                             <View className="mt-4 bg-cardSurface p-5 rounded-3xl border border-primary/20">
                                 <Text className="text-textSecondary text-xs font-black uppercase mb-2">Total</Text>
                                 <View className="flex-row items-center justify-between">
                                     <View>
-                                        <Text className="text-primary font-black text-3xl">{currencySymbol}{totalEditMode ? finalPaidAmount : formatCurrency(total).replace(currencySymbol,'')}</Text>
-                                        {totalEditMode && parseFloat(finalPaidAmount) !== total && (
-                                            <Text style={{ color: '#64748B', fontSize: 13, textDecorationLine: 'line-through', marginTop: 2 }}>{currencySymbol}{total}</Text>
+                                        <Text className="text-primary font-black text-3xl">
+                                            {totalEditMode ? formatCurrency(parseFloat(finalPaidAmount) || 0, currencySymbol) : formatAmount(total)}
+                                        </Text>
+                                        {totalEditMode && (parseFloat(finalPaidAmount) || 0) !== total && (
+                                            <Text style={{ color: '#64748B', fontSize: 13, textDecorationLine: 'line-through', marginTop: 2 }}>{formatAmount(total)}</Text>
                                         )}
                                     </View>
                                     <TouchableOpacity onPress={() => { setTotalEditMode(!totalEditMode); if (!totalEditMode) setFinalPaidAmount(total.toString()); }} className="p-2">
@@ -804,11 +972,14 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
                             <Text className="text-textSecondary text-xs font-black uppercase mb-3 mt-2">Customer Details {selectedPaymentType === 'PAY_LATER' ? '(Required)' : '(Optional)'}</Text>
                             <View className="mb-8">
                                 <TextInput placeholderTextColor="#94A3B8" 
-                                    className="bg-lightBackground border border-border p-4 rounded-xl font-bold mb-3 text-textPrimary" 
+                                    className={`bg-lightBackground border p-4 rounded-xl font-bold mb-1 text-textPrimary ${customerNameError && selectedPaymentType === 'PAY_LATER' ? 'border-red-500' : 'border-border'}`}
                                     placeholder="Customer Name"
                                     value={customerName}
-                                    onChangeText={setCustomerName}
+                                    onChangeText={(t) => { setCustomerName(t); if (customerNameError) setCustomerNameError(''); }}
                                 />
+                                {customerNameError && selectedPaymentType === 'PAY_LATER' && (
+                                    <Text className="text-red-500 font-bold text-[10px] mb-2 ml-1">{customerNameError}</Text>
+                                )}
                                 <TextInput placeholderTextColor="#94A3B8" 
                                     className="bg-lightBackground border border-border p-4 rounded-xl font-bold text-textPrimary" 
                                     placeholder="Phone Number"
@@ -828,7 +999,9 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
                                 {saleLoading ? (
                                     <ActivityIndicator color="white" />
                                 ) : (
-                                    <Text className="text-white font-black text-lg">Confirm {currencySymbol}{totalEditMode ? (finalPaidAmount || total) : formatCurrency(total).replace(currencySymbol,'')}</Text>
+                                    <Text className="text-white font-black text-lg">
+                                        Confirm {totalEditMode ? formatCurrency(parseFloat(finalPaidAmount) || total, currencySymbol) : formatAmount(total)}
+                                    </Text>
                                 )}
                             </TouchableOpacity>
                         </View>
@@ -836,38 +1009,42 @@ export default function SellScreen({ onNavigateToStock }: { onNavigateToStock?: 
                 </KeyboardAvoidingView>
             </Modal>
 
-            {/* Biometric Prompt Modal */}
-            <Modal visible={biometricPromptVisible} animationType="fade" transparent>
-                <View className="flex-1 justify-center items-center bg-black/60 px-6">
-                    <View className="bg-white rounded-3xl p-8 items-center w-full shadow-2xl">
-                        <View className="w-16 h-16 bg-lightGreen rounded-full items-center justify-center mb-6">
-                            <Fingerprint size={32} color="#16A34A" />
-                        </View>
-                        <Text className="text-xl font-black text-textPrimary text-center mb-2">Enable Biometric Login?</Text>
-                        <Text className="text-textSecondary font-bold text-center mb-8">Use your fingerprint or Face ID for faster, secure access next time.</Text>
-                        
-                        <TouchableOpacity 
-                            onPress={handleEnableBiometric}
-                            className="w-full h-14 bg-primary rounded-xl items-center justify-center mb-4"
-                        >
-                            <Text className="text-white font-black text-lg">Enable Now</Text>
-                        </TouchableOpacity>
-                        
-                        <TouchableOpacity 
-                            onPress={handleDeclineBiometric}
-                            className="w-full h-14 rounded-xl items-center justify-center bg-lightBackground"
-                        >
-                            <Text className="text-textSecondary font-bold">Maybe Later</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </Modal>
-
             {successVisible && (
                 <View className="absolute inset-0 bg-primary items-center justify-center z-[200]">
                     <CheckCircle size={100} color="white" />
                     <Text className="text-white font-black text-3xl mt-4">SALE RECORDED</Text>
                 </View>
+            )}
+
+            {celebrationVisible && (
+                <Modal visible={celebrationVisible} transparent animationType="fade">
+                    <View className="flex-1 bg-black/60 items-center justify-center px-6">
+                        <View className="bg-white rounded-[40px] p-8 w-full items-center shadow-2xl">
+                            <View className="w-20 h-20 bg-[#DCFCE7] rounded-full items-center justify-center mb-6">
+                                <Sparkles size={40} color="#16A34A" />
+                            </View>
+                            <Text className="text-textPrimary font-black text-3xl text-center mb-2">🎉 Congratulations!</Text>
+                            <Text className="text-textSecondary font-bold text-sm text-center mb-8 leading-6">
+                                You just made your first Chobo sale! Your inventory has been updated automatically. Now let's see your real-time business profits.
+                            </Text>
+                            <TouchableOpacity 
+                                onPress={() => {
+                                    setCelebrationVisible(false);
+                                    if (onNavigateToOverview) onNavigateToOverview();
+                                }}
+                                className="bg-primary w-full py-4 rounded-2xl items-center justify-center shadow-lg shadow-primary/30"
+                            >
+                                <Text className="text-white font-black text-base">Check my earnings in Overview →</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                onPress={() => setCelebrationVisible(false)}
+                                className="mt-4"
+                            >
+                                <Text className="text-textSecondary font-bold text-sm">Keep Selling</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </Modal>
             )}
         </View>
     );

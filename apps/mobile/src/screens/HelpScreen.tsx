@@ -6,7 +6,7 @@ import Constants from 'expo-constants';
 const FAQS = [
     { q: 'How do I add a new product?', a: 'Go to the Stock Hub tab and tap the + button or the scanner icon. You can manually enter details or scan a barcode to automatically fetch details if available.' },
     { q: 'How do I track what customers owe?', a: 'When checking out, select the "Pay Later" method. Make sure to enter the customer\'s name and phone number. You can then view all debts in the Ledger tab under "Owing".' },
-    { q: 'Can I use KashAm offline?', a: 'Yes! KashAm is designed to work completely offline. Any sales or products you add while offline will sync to the cloud automatically once your internet connection is restored.' },
+    { q: 'Can I use Chobo offline?', a: 'Yes! Chobo is designed to work completely offline. Any sales or products you add while offline will sync to the cloud automatically once your internet connection is restored.' },
     { q: 'How do I share a receipt?', a: 'After completing a sale, you will be prompted to share a receipt. You can also go to the Ledger, tap any transaction to view details, and share it from there.' }
 ];
 
@@ -47,7 +47,7 @@ export default function HelpScreen({ onBack }: { onBack: () => void }) {
 
                     <TouchableOpacity 
                         className="flex-row items-center justify-between p-5"
-                        onPress={() => Linking.openURL('mailto:support@kasham.app')}
+                        onPress={() => Linking.openURL('mailto:support@chobo.app')}
                     >
                         <View className="flex-row items-center">
                             <View className="w-10 h-10 bg-infoLight rounded-xl items-center justify-center mr-4">
@@ -55,7 +55,7 @@ export default function HelpScreen({ onBack }: { onBack: () => void }) {
                             </View>
                             <View>
                                 <Text className="font-bold text-textPrimary">Email Us</Text>
-                                <Text className="text-[10px] text-textSecondary font-bold mt-1 uppercase">support@kasham.app</Text>
+                                <Text className="text-[10px] text-textSecondary font-bold mt-1 uppercase">support@chobo.app</Text>
                             </View>
                         </View>
                         <ExternalLink size={16} color="#64748B" />
@@ -90,7 +90,7 @@ export default function HelpScreen({ onBack }: { onBack: () => void }) {
 
                 {/* APP INFO */}
                 <View className="items-center mb-12">
-                    <Text className="text-textPrimary font-black text-lg mb-1">KashAm</Text>
+                    <Text className="text-textPrimary font-black text-lg mb-1">Chobo</Text>
                     <Text className="text-textSecondary font-bold text-xs">Version {version}</Text>
                 </View>
 

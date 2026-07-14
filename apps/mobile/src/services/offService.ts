@@ -1,5 +1,5 @@
 /**
- * Open Food Facts API Service for KashAm.
+ * Open Food Facts API Service for Chobo.
  */
 
 export interface OFFProduct {

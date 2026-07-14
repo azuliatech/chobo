@@ -1,26 +1,44 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { ArrowLeft, Database, HardDrive } from 'lucide-react-native';
+import AppModal from '../components/AppModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { db } from '../db';
 
 export default function DevToolsScreen({ onBack }: { onBack: () => void }) {
+    const [modal, setModal] = React.useState<{ visible: boolean; type: 'success' | 'error' | 'warning' | 'info'; title: string; subtitle?: string; primaryLabel?: string; onPrimary?: () => void; secondaryLabel?: string; onSecondary?: () => void; autoDismiss?: boolean } | null>(null);
     const handleClearAsyncStorage = async () => {
         await AsyncStorage.clear();
-        Alert.alert('Cleared', 'AsyncStorage wiped.');
+        setModal({
+            visible: true,
+            type: 'success',
+            title: 'Cleared',
+            subtitle: 'AsyncStorage wiped.',
+            autoDismiss: true,
+        });
     };
 
     const handleClearSecureStore = async () => {
         await SecureStore.deleteItemAsync('jwt_token');
         await SecureStore.deleteItemAsync('jwt_refresh_token');
-        Alert.alert('Cleared', 'SecureStore auth tokens wiped.');
+        setModal({
+            visible: true,
+            type: 'success',
+            title: 'Cleared',
+            subtitle: 'SecureStore auth tokens wiped.',
+            autoDismiss: true,
+        });
     };
 
     const handleDropTables = async () => {
-        Alert.alert('Warning', 'This will wipe all SQLite tables and data. You must restart the app afterward.', [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Wipe', style: 'destructive', onPress: async () => {
+        setModal({
+            visible: true,
+            type: 'warning',
+            title: 'Warning',
+            subtitle: 'This will wipe all SQLite tables and data. You must restart the app afterward.',
+            primaryLabel: 'Wipe',
+            onPrimary: async () => {
                 await db.execAsync(`
                     DROP TABLE IF EXISTS products;
                     DROP TABLE IF EXISTS sales;
@@ -30,9 +48,16 @@ export default function DevToolsScreen({ onBack }: { onBack: () => void }) {
                     DROP TABLE IF EXISTS notifications;
                     DROP TABLE IF EXISTS payment_logs;
                 `);
-                Alert.alert('Wiped', 'Restart app to recreate tables.');
-            }}
-        ]);
+                setModal({
+                    visible: true,
+                    type: 'success',
+                    title: 'Wiped',
+                    subtitle: 'Restart app to recreate tables.',
+                    autoDismiss: true,
+                });
+            },
+            secondaryLabel: 'Cancel',
+        });
     };
 
     return (
@@ -66,6 +91,18 @@ export default function DevToolsScreen({ onBack }: { onBack: () => void }) {
                     </View>
                 </TouchableOpacity>
             </ScrollView>
+            <AppModal
+                visible={modal?.visible ?? false}
+                type={modal?.type ?? 'info'}
+                title={modal?.title ?? ''}
+                subtitle={modal?.subtitle}
+                primaryLabel={modal?.primaryLabel}
+                onPrimary={() => { modal?.onPrimary?.(); setModal(null); }}
+                secondaryLabel={modal?.secondaryLabel}
+                onSecondary={() => { modal?.onSecondary?.(); setModal(null); }}
+                onDismiss={() => setModal(null)}
+                autoDismiss={modal?.autoDismiss}
+            />
         </View>
     );
 }

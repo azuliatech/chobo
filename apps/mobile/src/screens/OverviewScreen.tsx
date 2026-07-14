@@ -12,19 +12,20 @@ import {
     Receipt, 
     ArrowUpRight, 
     Package,
-    Lock,
     Sparkles
 } from 'lucide-react-native';
 
+
 type TimeFilter = 'today' | 'week' | 'month';
 
-export default function OverviewScreen() {
+export default function OverviewScreen({ onNavigateToSell }: { onNavigateToSell?: () => void }) {
     const [filter, setFilter] = useState<TimeFilter>('today');
     const [stats, setStats] = useState<any>(null);
     const [topProducts, setTopProducts] = useState<any[]>([]);
     const [refreshing, setRefreshing] = useState(false);
-    const { userId } = useAuthStore();
+    const { userId, activeRole, setShowSubscriptionModal } = useAuthStore();
     const { formatAmount } = useCurrency();
+    const isCashier = activeRole === 'STAFF';
 
     const loadData = useCallback(async () => {
         if (!userId) return;
@@ -89,115 +90,130 @@ export default function OverviewScreen() {
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadData} />}
                 showsVerticalScrollIndicator={false}
             >
-                {/* HERO CARD */}
-                <View className="bg-textPrimary p-6 rounded-[32px] mb-6 shadow-xl relative overflow-hidden">
-                    <View className="absolute -top-12 -right-12 w-48 h-48 bg-primary/20 rounded-full blur-3xl" />
-                    <View className="absolute -bottom-8 -left-8 w-32 h-32 bg-accent/20 rounded-full blur-2xl" />
-                    
-                    <Text className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-1">Total Revenue</Text>
-                    <Text className="text-white font-black text-4xl mb-4">{formatAmount(stats?.revenue || 0)}</Text>
-                    
-                    <View className="flex-row items-center">
-                        <View className="flex-row items-center bg-primary/20 px-2.5 py-1 rounded-full mr-2 border border-primary/30">
-                            <TrendingUp size={12} color="#4ADE80" />
-                            <Text className="text-[#4ADE80] font-black text-[10px] ml-1">+12.5%</Text>
+                {(!stats || stats.revenue === 0) ? (
+                    <View className="bg-white rounded-[32px] p-6 border border-border shadow-sm items-center my-6">
+                        <View className="bg-primaryLight w-16 h-16 rounded-full items-center justify-center mb-6">
+                            <Sparkles size={32} color="#16A34A" />
                         </View>
-                        <Text className="text-white/60 font-bold text-xs">vs last {filter === 'today' ? 'period' : filter}</Text>
+                        <Text className="text-textPrimary font-black text-2xl text-center mb-2">Finally know exactly where your money goes</Text>
+                        <Text className="text-textSecondary font-bold text-sm text-center mb-8 leading-6">
+                            Record your first sale to see today's earnings, profit margins, and payment breakdown here.
+                        </Text>
+                        {onNavigateToSell && (
+                            <TouchableOpacity 
+                                onPress={onNavigateToSell}
+                                className="bg-primary w-full py-4 rounded-xl items-center justify-center flex-row shadow-sm active:bg-[#15803D]"
+                            >
+                                <Text className="text-white font-black text-base mr-2">Record a Sale</Text>
+                                <ArrowUpRight size={18} color="white" />
+                            </TouchableOpacity>
+                        )}
                     </View>
-                </View>
-
-                {/* 2x2 METRIC GRID */}
-                <View className="flex-row flex-wrap gap-4 mb-8">
-                    <View className="w-[47%] bg-white p-4 rounded-3xl border border-border shadow-sm">
-                        <View className="w-8 h-8 rounded-full bg-primaryLight items-center justify-center mb-3">
-                            <Receipt size={16} color="#16A34A" />
-                        </View>
-                        <Text className="text-textSecondary text-[10px] font-bold uppercase mb-1">Sales Count</Text>
-                        <Text className="text-textPrimary font-black text-2xl">{stats?.count || 0}</Text>
-                    </View>
-                    <View className="w-[47%] bg-white p-4 rounded-3xl border border-border shadow-sm">
-                        <View className="w-8 h-8 rounded-full bg-dangerLight items-center justify-center mb-3">
-                            <TrendingDown size={16} color="#EF4444" />
-                        </View>
-                        <Text className="text-textSecondary text-[10px] font-bold uppercase mb-1">Debt Issued</Text>
-                        <Text className="text-textPrimary font-black text-2xl">{formatAmount(stats?.debt || 0)}</Text>
-                    </View>
-                </View>
-
-                {/* PAYMENT BREAKDOWN */}
-                <View className="mb-8">
-                    <Text className="text-textPrimary font-black text-lg mb-4">Payment Mix</Text>
-                    
-                    {stats?.revenue > 0 ? (
-                        <>
-                            <View className="h-4 flex-row rounded-full overflow-hidden mb-4">
-                                {getRevenueMix().map((m, idx) => (
-                                    <View key={idx} style={{ flex: m.flex, backgroundColor: m.color, borderRightWidth: idx < getRevenueMix().length-1 ? 2 : 0, borderColor: 'white' }} />
-                                ))}
+                ) : (
+                    <>
+                        {/* HERO CARD — hidden from Cashiers */}
+                        {!isCashier ? (
+                        <View className="bg-textPrimary p-6 rounded-[32px] mb-6 shadow-xl relative overflow-hidden">
+                            <View className="absolute -top-12 -right-12 w-48 h-48 bg-primary/20 rounded-full blur-3xl" />
+                            <View className="absolute -bottom-8 -left-8 w-32 h-32 bg-accent/20 rounded-full blur-2xl" />
+                            
+                            <Text className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-1">Total Revenue</Text>
+                            <Text className="text-white font-black text-4xl mb-4">{formatAmount(stats?.revenue || 0)}</Text>
+                            
+                            <View className="flex-row items-center">
+                                <View className="flex-row items-center bg-primary/20 px-2.5 py-1 rounded-full mr-2 border border-primary/30">
+                                    <TrendingUp size={12} color="#4ADE80" />
+                                    <Text className="text-[#4ADE80] font-black text-[10px] ml-1">+12.5%</Text>
+                                </View>
+                                <Text className="text-white/60 font-bold text-xs">vs last {filter === 'today' ? 'period' : filter}</Text>
                             </View>
-                            <View className="flex-row flex-wrap gap-y-3">
-                                {getRevenueMix().map((m, idx) => (
-                                    <View key={idx} className="w-[50%] flex-row items-center">
-                                        <View className="w-2 h-2 rounded-full mr-2" style={{ backgroundColor: m.color }} />
-                                        <Text className="text-textSecondary font-bold text-xs uppercase w-16">{m.label}</Text>
-                                        <Text className="text-textPrimary font-black text-xs">{formatAmount(m.value)}</Text>
+                        </View>
+                        ) : (
+                        <View className="bg-textPrimary p-6 rounded-[32px] mb-6 shadow-xl">
+                            <Text className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-1">Your Sales Today</Text>
+                            <Text className="text-white font-black text-4xl mb-2">{stats?.count || 0}</Text>
+                            <Text className="text-white/40 text-xs font-semibold">Transactions recorded this period</Text>
+                        </View>
+                        )}
+
+                        {/* 2x2 METRIC GRID */}
+                        <View className="flex-row flex-wrap gap-4 mb-8">
+                            <View className="w-[47%] bg-white p-4 rounded-3xl border border-border shadow-sm">
+                                <View className="w-8 h-8 rounded-full bg-primaryLight items-center justify-center mb-3">
+                                    <Receipt size={16} color="#16A34A" />
+                                </View>
+                                <Text className="text-textSecondary text-[10px] font-bold uppercase mb-1">Sales Count</Text>
+                                <Text className="text-textPrimary font-black text-2xl">{stats?.count || 0}</Text>
+                            </View>
+                            {/* Debt card hidden from Cashiers */}
+                            {!isCashier && (
+                            <View className="w-[47%] bg-white p-4 rounded-3xl border border-border shadow-sm">
+                                <View className="w-8 h-8 rounded-full bg-dangerLight items-center justify-center mb-3">
+                                    <TrendingDown size={16} color="#EF4444" />
+                                </View>
+                                <Text className="text-textSecondary text-[10px] font-bold uppercase mb-1">Debt Issued</Text>
+                                <Text className="text-textPrimary font-black text-2xl">{formatAmount(stats?.debt || 0)}</Text>
+                            </View>
+                            )}
+                        </View>
+
+                        {/* PAYMENT BREAKDOWN */}
+                        <View className="mb-8">
+                            <Text className="text-textPrimary font-black text-lg mb-4">Payment Mix</Text>
+                            
+                            {stats?.revenue > 0 ? (
+                                <>
+                                    <View className="h-4 flex-row rounded-full overflow-hidden mb-4">
+                                        {getRevenueMix().map((m, idx) => (
+                                            <View key={idx} style={{ flex: m.flex, backgroundColor: m.color, borderRightWidth: idx < getRevenueMix().length-1 ? 2 : 0, borderColor: 'white' }} />
+                                        ))}
                                     </View>
-                                ))}
-                            </View>
-                        </>
-                    ) : (
-                        <View className="bg-lightBackground p-4 rounded-2xl items-center border border-border">
-                            <Text className="text-textSecondary font-bold text-xs">No payment data yet.</Text>
+                                    <View className="flex-row flex-wrap gap-y-3">
+                                        {getRevenueMix().map((m, idx) => (
+                                            <View key={idx} className="w-[50%] flex-row items-center">
+                                                <View className="w-2 h-2 rounded-full mr-2" style={{ backgroundColor: m.color }} />
+                                                <Text className="text-textSecondary font-bold text-xs uppercase w-16">{m.label}</Text>
+                                                <Text className="text-textPrimary font-black text-xs">{formatAmount(m.value)}</Text>
+                                            </View>
+                                        ))}
+                                    </View>
+                                </>
+                            ) : (
+                                <View className="bg-lightBackground p-4 rounded-2xl items-center border border-border">
+                                    <Text className="text-textSecondary font-bold text-xs">No payment data yet.</Text>
+                                </View>
+                            )}
                         </View>
-                    )}
-                </View>
 
-                {/* TOP 5 PRODUCTS */}
-                <View className="mb-8">
-                    <Text className="text-textPrimary font-black text-lg mb-4">Top Sellers</Text>
-                    {topProducts.length === 0 && (
-                        <View className="bg-lightBackground p-6 rounded-2xl items-center border border-border">
-                            <Package size={24} color="#64748B" />
-                            <Text className="text-textSecondary font-bold mt-2">No products sold yet.</Text>
+                        {/* TOP 5 PRODUCTS */}
+                        <View className="mb-8">
+                            <Text className="text-textPrimary font-black text-lg mb-4">Top Sellers</Text>
+                            {topProducts.length === 0 && (
+                                <View className="bg-lightBackground p-6 rounded-2xl items-center border border-border">
+                                    <Package size={24} color="#64748B" />
+                                    <Text className="text-textSecondary font-bold mt-2">No products sold yet.</Text>
+                                </View>
+                            )}
+                            {topProducts.map((p, idx) => (
+                                <View key={idx} className="bg-white p-4 rounded-2xl mb-2 flex-row items-center border border-border shadow-sm">
+                                    <View className="w-10 h-10 rounded-xl bg-primaryLight items-center justify-center overflow-hidden mr-4">
+                                        {p.image_uri ? (
+                                            <Image source={{ uri: p.image_uri }} className="w-full h-full" />
+                                        ) : (
+                                            <Text className="text-primaryDark font-black">{getInitials(p.name)}</Text>
+                                        )}
+                                    </View>
+                                    <View className="flex-1">
+                                        <Text className="font-bold text-sm text-textPrimary" numberOfLines={1}>{p.name}</Text>
+                                        <Text className="text-textSecondary text-[10px] font-black uppercase mt-0.5">{p.total_qty} Units Sold</Text>
+                                    </View>
+                                    <Text className="text-primary font-black text-sm">{formatAmount(p.price * p.total_qty)}</Text>
+                                </View>
+                            ))}
                         </View>
-                    )}
-                    {topProducts.map((p, idx) => (
-                        <View key={idx} className="bg-white p-4 rounded-2xl mb-2 flex-row items-center border border-border shadow-sm">
-                            <View className="w-10 h-10 rounded-xl bg-primaryLight items-center justify-center overflow-hidden mr-4">
-                                {p.image_uri ? (
-                                    <Image source={{ uri: p.image_uri }} className="w-full h-full" />
-                                ) : (
-                                    <Text className="text-primaryDark font-black">{getInitials(p.name)}</Text>
-                                )}
-                            </View>
-                            <View className="flex-1">
-                                <Text className="font-bold text-sm text-textPrimary" numberOfLines={1}>{p.name}</Text>
-                                <Text className="text-textSecondary text-[10px] font-black uppercase mt-0.5">{p.total_qty} Units Sold</Text>
-                            </View>
-                            <Text className="text-primary font-black text-sm">{formatAmount(p.price * p.total_qty)}</Text>
-                        </View>
-                    ))}
-                </View>
 
-                {/* AI INSIGHT BANNER (LOCKED) */}
-                <View className="bg-gradient-to-r from-accent/20 to-primary/20 p-6 rounded-[32px] border border-accent/30 relative overflow-hidden">
-                    <View className="flex-row items-start justify-between mb-2 z-10">
-                        <View className="flex-row items-center bg-white/50 px-2 py-1 rounded-full border border-white">
-                            <Sparkles size={12} color="#92400E" />
-                            <Text className="text-[#92400E] font-black text-[9px] uppercase ml-1 tracking-widest">KashAm AI</Text>
-                        </View>
-                        <View className="bg-textPrimary p-2 rounded-full">
-                            <Lock size={14} color="white" />
-                        </View>
-                    </View>
-                    <Text className="text-textPrimary font-black text-xl mb-2 z-10">Smart Restock Insights</Text>
-                    <Text className="text-textSecondary font-bold text-xs leading-5 mb-4 z-10">
-                        Unlock predictive analytics to know exactly what to restock before you run out.
-                    </Text>
-                    <TouchableOpacity className="bg-textPrimary py-3 rounded-xl items-center z-10 w-32 shadow-lg shadow-black/20">
-                        <Text className="text-white font-black text-xs">Upgrade Plan</Text>
-                    </TouchableOpacity>
-                </View>
+                    </>
+                )}
 
             </ScrollView>
         </View>

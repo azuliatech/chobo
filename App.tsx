@@ -81,7 +81,7 @@ export default function App() {
     return (
       <View className="flex-1 bg-white items-center justify-center">
         <ActivityIndicator size="large" color="#16A34A" />
-        <Text className="text-textSecondary mt-4 font-bold">Initializing KashAm...</Text>
+        <Text className="text-textSecondary mt-4 font-bold">Initializing Chobo...</Text>
       </View>
     );
   }

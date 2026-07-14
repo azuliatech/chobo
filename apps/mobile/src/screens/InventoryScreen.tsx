@@ -1,9 +1,11 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-    View, Text, TextInput, TouchableOpacity, FlatList, Modal, ScrollView, Image, ActivityIndicator, Alert
+    View, Text, TextInput, TouchableOpacity, FlatList, Modal, ScrollView, Image, ActivityIndicator
 } from 'react-native';
+import AppModal from '../components/AppModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getProducts, createProduct, updateProduct, updateProductQuantity, deleteProduct, getStockSummary } from '../db';
+import { pushSalesToBackend } from '../services/syncService';
 import { 
     Plus, 
     X, 
@@ -36,8 +38,18 @@ interface InventoryScreenProps {
     onClearBarcode?: () => void;
 }
 
-type LookupState = 'idle' | 'local' | 'kasham' | 'global' | 'done';
-type StockTab = 'inStock' | 'addQuantity';
+type LookupState = 'idle' | 'local' | 'chobo' | 'global' | 'done';
+type StockTab = 'inStock' | 'lowStock' | 'outOfStock';
+const CATEGORIES = [
+    { label: 'Provisions', value: 'Provisions' },
+    { label: 'Beverages', value: 'Beverages' },
+    { label: 'Snacks', value: 'Snacks' },
+    { label: 'Pharmacy', value: 'Pharmacy' },
+    { label: 'Clothes', value: 'Clothes' },
+    { label: 'Electronics', value: 'Electronics' },
+    { label: 'Fresh Food', value: 'Fresh Food' },
+    { label: 'Others', value: 'Others' }
+];
 
 const debounce = (func: Function, delay: number) => {
     let timeout: NodeJS.Timeout;
@@ -53,6 +65,7 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
     const [searchQuery, setSearchQuery] = useState('');
     const [summary, setSummary] = useState({ total: 0, low: 0, outOfStock: 0 });
     const [modalVisible, setModalVisible] = useState(false);
+    const [modal, setModal] = useState<{ visible: boolean; type: 'success' | 'error' | 'warning' | 'info'; title: string; subtitle?: string; primaryLabel?: string; onPrimary?: () => void; secondaryLabel?: string; onSecondary?: () => void; autoDismiss?: boolean } | null>(null);
     const [scannerVisible, setScannerVisible] = useState(false);
     const [editingProduct, setEditingProduct] = useState<any>(null);
     const [loading, setLoading] = useState(false);
@@ -68,6 +81,15 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
     const [stock, setStock] = useState('');
     const [barcode, setBarcode] = useState('');
     const [imageUri, setImageUri] = useState<string | null>(null);
+    const [category, setCategory] = useState('Provisions');
+    const [customCategory, setCustomCategory] = useState('');
+    const [showCustomInput, setShowCustomInput] = useState(false);
+
+    // Validation error states
+    const [nameError, setNameError] = useState('');
+    const [priceError, setPriceError] = useState('');
+    const [stockError, setStockError] = useState('');
+
     const [lookupState, setLookupState] = useState<LookupState>('idle');
     const [activeTab, setActiveTab] = useState<StockTab>('inStock');
     const [nameSuggestions, setNameSuggestions] = useState<any[]>([]);
@@ -78,7 +100,8 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
     const [selectedPendingProduct, setSelectedPendingProduct] = useState<any>(null);
 
     const [permission, requestPermission] = useCameraPermissions();
-    const { token, userId } = useAuthStore();
+    const { token, userId, activeRole } = useAuthStore();
+    const isCashier = activeRole === 'STAFF';
     const { isOnline } = useSyncStore();
     const { symbol, formatAmount } = useCurrency();
     const insets = useSafeAreaInsets();
@@ -122,10 +145,20 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
     }, [searchQuery, products, sortBy]);
 
     const handleLookupFlow = async (barcodeData: string) => {
+        if (!barcodeData) return;
+
+        setShowLookupStatus(true);
         const local = products.find(p => p.barcode === barcodeData);
         if (local) {
+            setShowLookupStatus(false);
+            setScannerVisible(false);
             handleEdit(local);
-            Alert.alert('Found', `${local.name} is already in your stock.`);
+            setModal({
+                visible: true,
+                type: 'info',
+                title: 'Found',
+                subtitle: `${local.name} is already in your stock.`,
+            });
             return;
         }
 
@@ -135,25 +168,54 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
         setPrice('');
         setStock('');
         setImageUri(null);
+        setCategory('Provisions');
+        setCustomCategory('');
+        setShowCustomInput(false);
 
         if (!isOnline) {
-            Alert.alert('Offline', "You're offline — barcode lookup unavailable. Fill in details manually.");
+            setShowLookupStatus(false);
+            setScannerVisible(false);
+            setModal({
+                visible: true,
+                type: 'info',
+                title: 'Offline',
+                subtitle: "You're offline — barcode lookup unavailable. Fill in details manually.",
+            });
             setModalVisible(true);
             return;
         }
 
         try {
-            // 1. Check KashAm Shared Catalogue
-            setLookupState('kasham');
+            // 1. Check Chobo Shared Catalogue
+            setLookupState('chobo');
             const res = await fetch(`${API_BASE_URL}/catalogue/lookup/${barcodeData}`);
-            if (res.ok) {
-                const data = await res.json();
-                if (data) {
-                    setName(data.name);
-                    if (data.imageUrl) setImageUri(data.imageUrl);
-                    setLookupState('done');
-                    setModalVisible(true);
-                    return;
+            if (res.ok && res.status !== 204) {
+                const contentType = res.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const data = await res.json();
+                    if (data) {
+                        setName(data.name);
+                        if (data.imageUrl) setImageUri(data.imageUrl);
+                        
+                        // Prefill Category
+                        if (data.category) {
+                            const matched = CATEGORIES.find(c => c.value.toLowerCase() === data.category.toLowerCase());
+                            if (matched && matched.value !== 'Others') {
+                                setCategory(matched.value);
+                                setShowCustomInput(false);
+                            } else {
+                                setCategory('Others');
+                                setCustomCategory(data.category === 'Others' ? '' : data.category);
+                                setShowCustomInput(true);
+                            }
+                        }
+
+                        setLookupState('done');
+                        setShowLookupStatus(false);
+                        setScannerVisible(false);
+                        setModalVisible(true);
+                        return;
+                    }
                 }
             }
 
@@ -164,7 +226,20 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                 setName(offData.name);
                 if (offData.image) setImageUri(offData.image);
                 
-                // 3. Contribute to KashAm Catalogue so others can find it
+                // Prefill Category
+                if (offData.category) {
+                    const matched = CATEGORIES.find(c => c.value.toLowerCase() === offData.category.toLowerCase());
+                    if (matched && matched.value !== 'Others') {
+                        setCategory(matched.value);
+                        setShowCustomInput(false);
+                    } else {
+                        setCategory('Others');
+                        setCustomCategory(offData.category === 'Others' ? '' : offData.category);
+                        setShowCustomInput(true);
+                    }
+                }
+
+                // 3. Contribute to Chobo Catalogue so others can find it
                 fetch(`${API_BASE_URL}/catalogue/contribute`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -182,6 +257,7 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
         } finally {
             setShowLookupStatus(false);
             setLookupState('done');
+            setScannerVisible(false);
             setModalVisible(true);
         }
     };
@@ -252,39 +328,112 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
         setStock(product.stock.toString());
         setBarcode(product.barcode || '');
         setImageUri(product.image_uri || null);
+        
+        setNameError('');
+        setPriceError('');
+        setStockError('');
+
+        if (product.category) {
+            const matched = CATEGORIES.find(c => c.value.toLowerCase() === product.category.toLowerCase());
+            if (matched && matched.value !== 'Others') {
+                setCategory(matched.value);
+                setShowCustomInput(false);
+            } else {
+                setCategory('Others');
+                setCustomCategory(product.category === 'Others' ? '' : product.category);
+                setShowCustomInput(true);
+            }
+        } else {
+            setCategory('Provisions');
+            setShowCustomInput(false);
+        }
+
         setModalVisible(true);
     };
 
     const handleDelete = (product: any) => {
-        Alert.alert('Delete', `Are you sure you want to delete ${product.name}?`, [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Delete', style: 'destructive', onPress: async () => {
+        setModal({
+            visible: true,
+            type: 'warning',
+            title: 'Delete',
+            subtitle: `Are you sure you want to delete ${product.name}?`,
+            primaryLabel: 'Delete',
+            onPrimary: async () => {
                 await deleteProduct(product.id);
                 loadData();
-            }}
-        ]);
+            },
+            secondaryLabel: 'Cancel',
+        });
     };
 
     const handleSave = async () => {
-        if (!name || !price || !stock) {
-            Alert.alert('Error', 'Please fill all required fields');
-            return;
+        let valid = true;
+        setNameError('');
+        setPriceError('');
+        setStockError('');
+
+        if (!name.trim()) {
+            setNameError('Product name is required');
+            valid = false;
         }
+        if (!price.trim()) {
+            setPriceError('Selling price is required');
+            valid = false;
+        } else if (isNaN(parseFloat(price)) || parseFloat(price) <= 0) {
+            setPriceError('Enter a valid price');
+            valid = false;
+        }
+        if (!stock.trim()) {
+            setStockError('Quantity is required');
+            valid = false;
+        } else if (isNaN(parseInt(stock, 10)) || parseInt(stock, 10) < 0) {
+            setStockError('Enter a valid quantity');
+            valid = false;
+        }
+
+        if (!valid) return;
 
         setLoading(true);
         try {
+            const finalCategory = category === 'Others' ? (customCategory.trim() || 'Others') : category;
+            
             if (editingProduct) {
-                await updateProduct(editingProduct.id, name, parseFloat(price), parseInt(stock, 10), barcode || null, imageUri, editingProduct.cost_price);
+                await updateProduct(editingProduct.id, name, parseFloat(price), parseInt(stock, 10), barcode || null, imageUri, editingProduct.cost_price, finalCategory);
             } else {
-                await createProduct(uuidv4(), name, parseFloat(price), parseInt(stock, 10), barcode || null, imageUri, userId || '', null);
+                await createProduct(uuidv4(), name, parseFloat(price), parseInt(stock, 10), barcode || null, imageUri, userId || '', null, finalCategory);
             }
+
+            // Contribute to the shared catalogue in background if online
+            if (barcode && isOnline) {
+                fetch(`${API_BASE_URL}/catalogue/contribute`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        barcode,
+                        name,
+                        imageUrl: imageUri,
+                        category: finalCategory
+                    })
+                }).catch(e => console.log('Contribution failed', e));
+            }
+
             setModalVisible(false);
             loadData();
         } catch (e: any) {
             if (e.message?.includes('UNIQUE')) {
-                Alert.alert('Error', 'Barcode already exists');
+                setModal({
+                    visible: true,
+                    type: 'error',
+                    title: 'Error',
+                    subtitle: 'Barcode already exists',
+                });
             } else {
-                Alert.alert('Error', 'Could not save product');
+                setModal({
+                    visible: true,
+                    type: 'error',
+                    title: 'Error',
+                    subtitle: 'Could not save product',
+                });
             }
         } finally {
             setLoading(false);
@@ -315,7 +464,7 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                 <View className="flex-1 bg-white p-4 rounded-3xl border border-border shadow-sm">
                     <Package size={20} color="#0F172A" />
                     <Text className="text-textPrimary font-black text-xl mt-2">{summary.total}</Text>
-                    <Text className="text-textSecondary text-[10px] font-bold uppercase tracking-tight">Total Stock</Text>
+                    <Text className="text-textSecondary text-[10px] font-bold uppercase tracking-tight">Total Products</Text>
                 </View>
                 <View className="flex-1 bg-accentLight p-4 rounded-3xl border border-accent/20 shadow-sm">
                     <AlertTriangle size={20} color="#92400E" />
@@ -411,9 +560,11 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                             </View>
                             <View className="flex-row gap-2">
                                 {activeTab === 'inStock' ? (
-                                    <TouchableOpacity onPress={() => handleEdit(item)} className="p-1.5 bg-lightBackground rounded-lg">
-                                        <Edit3 size={16} color="#64748B" />
-                                    </TouchableOpacity>
+                                    !isCashier && (
+                                        <TouchableOpacity onPress={() => handleEdit(item)} className="p-1.5 bg-lightBackground rounded-lg">
+                                            <Edit3 size={16} color="#64748B" />
+                                        </TouchableOpacity>
+                                    )
                                 ) : (
                                     <TouchableOpacity 
                                         onPress={() => { setSelectedPendingProduct(item); setShowAddQtySheet(true); }} 
@@ -422,7 +573,7 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                                         <Text className="text-white text-[10px] font-black">Add quantity</Text>
                                     </TouchableOpacity>
                                 )}
-                                {activeTab === 'inStock' && (
+                                {activeTab === 'inStock' && !isCashier && (
                                     <TouchableOpacity onPress={() => handleDelete(item)} className="p-1.5 bg-dangerLight rounded-lg">
                                         <Trash2 size={16} color="#EF4444" />
                                     </TouchableOpacity>
@@ -433,7 +584,8 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                 )}
             />
 
-            {/* FAB */}
+            {/* FAB — hidden from Cashiers */}
+            {!isCashier && (
             <View className="absolute bottom-6 right-6 items-end">
                 <TouchableOpacity 
                     onPress={handleOpenScanner}
@@ -442,12 +594,27 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                     <ScanLine size={20} color="white" />
                 </TouchableOpacity>
                 <TouchableOpacity 
-                    onPress={() => { setEditingProduct(null); setName(''); setPrice(''); setStock(''); setBarcode(''); setImageUri(null); setModalVisible(true); }}
+                    onPress={() => {
+                        setEditingProduct(null);
+                        setName('');
+                        setPrice('');
+                        setStock('');
+                        setBarcode('');
+                        setImageUri(null);
+                        setCategory('Provisions');
+                        setCustomCategory('');
+                        setShowCustomInput(false);
+                        setNameError('');
+                        setPriceError('');
+                        setStockError('');
+                        setModalVisible(true);
+                    }}
                     className="bg-primary w-14 h-14 rounded-full items-center justify-center shadow-lg shadow-primary/30"
                 >
                     <Plus size={28} color="white" />
                 </TouchableOpacity>
             </View>
+            )}
 
             {/* ADD QUANTITY MODAL */}
             <Modal visible={showAddQtySheet} transparent animationType="slide">
@@ -476,10 +643,14 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                             <TouchableOpacity 
                                 onPress={async () => {
                                     if (!newQuantity) return;
-                                    await updateProductQuantity(selectedPendingProduct.id, parseInt(newQuantity));
+                                    await updateProductQuantity(selectedPendingProduct.id, parseInt(newQuantity, 10));
                                     setShowAddQtySheet(false);
                                     setNewQuantity('');
-                                    loadData();
+                                    setActiveTab('inStock');
+                                    await loadData();
+                                    if (isOnline) {
+                                        pushSalesToBackend();
+                                    }
                                 }}
                                 className="flex-2 bg-primary py-4 rounded-2xl items-center"
                             >
@@ -505,7 +676,7 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                                 style={{ flex: 1 }}
                                 facing="back"
                                 onBarcodeScanned={({ data }) => {
-                                    setScannerVisible(false);
+                                    if (showLookupStatus) return;
                                     handleLookupFlow(data);
                                 }} 
                                 barcodeScannerSettings={{
@@ -517,9 +688,7 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                             <View className="mt-6 flex-row items-center gap-3 bg-white/10 px-4 py-2 rounded-full">
                                 <ActivityIndicator size="small" color="#16A34A" />
                                 <Text className="text-white font-bold">
-                                    {lookupState === 'local' && 'Searching your stock...'}
-                                    {lookupState === 'kasham' && 'Checking KashAm database...'}
-                                    {lookupState === 'global' && 'Checking global database...'}
+                                    Loading...
                                 </Text>
                             </View>
                         )}
@@ -539,31 +708,50 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                             </TouchableOpacity>
                         </View>
                         <ScrollView showsVerticalScrollIndicator={false}>
-                            <TouchableOpacity onPress={() => {
-                                Alert.alert("Product Image", "Choose an option", [
-                                    { text: "Take Photo", onPress: takePhoto },
-                                    { text: "Choose from Gallery", onPress: pickImage },
-                                    { text: "Cancel", style: "cancel" }
-                                ])
-                            }} className="w-24 h-24 bg-lightBackground rounded-3xl items-center justify-center border border-border self-center mb-6 overflow-hidden shadow-sm">
-                                {imageUri ? (
-                                    <Image source={{ uri: imageUri }} className="w-full h-full" resizeMode="cover" />
-                                ) : (
-                                    <View className="items-center justify-center">
-                                        <Camera size={24} color="#64748B" />
-                                        <Text className="text-[10px] text-textSecondary font-bold mt-1">Add Image</Text>
-                                    </View>
+                            {/* Image Selection Area with Absolute Delete X Overlay */}
+                            <View className="w-24 h-24 self-center mb-6 relative">
+                                <TouchableOpacity onPress={() => {
+                                    setModal({
+                                        visible: true,
+                                        type: 'info',
+                                        title: 'Product Image',
+                                        subtitle: 'Choose an option',
+                                        primaryLabel: 'Take Photo',
+                                        onPrimary: takePhoto,
+                                        secondaryLabel: 'Choose from Gallery',
+                                        onSecondary: pickImage,
+                                    });
+                                }} className="w-full h-full bg-lightBackground rounded-3xl items-center justify-center border border-border overflow-hidden shadow-sm">
+                                    {imageUri ? (
+                                        <Image source={{ uri: imageUri }} className="w-full h-full" resizeMode="cover" />
+                                    ) : (
+                                        <View className="items-center justify-center">
+                                            <Camera size={24} color="#64748B" />
+                                            <Text className="text-[10px] text-textSecondary font-bold mt-1">Add Image</Text>
+                                        </View>
+                                    )}
+                                </TouchableOpacity>
+                                {imageUri && (
+                                    <TouchableOpacity 
+                                        onPress={() => setImageUri(null)} 
+                                        className="absolute top-2 right-2 bg-black/60 rounded-full p-1.5 z-50 shadow-md"
+                                    >
+                                        <X size={12} color="white" />
+                                    </TouchableOpacity>
                                 )}
-                            </TouchableOpacity>
-                            <View className="z-50">
+                            </View>
+
+                            {/* Name and suggestions */}
+                            <View className="z-50 mb-2">
                                 <TextInput placeholderTextColor="#94A3B8" 
-                                    className="bg-lightBackground border border-border p-4 rounded-xl font-bold mb-1 text-textPrimary" 
+                                    className={`bg-lightBackground border p-4 rounded-xl font-bold text-textPrimary ${nameError ? 'border-red-500' : 'border-border'}`} 
                                     placeholder="Product Name" 
                                     value={name} 
-                                    onChangeText={handleNameChange} 
+                                    onChangeText={(t) => { handleNameChange(t); if (nameError) setNameError(''); }} 
                                 />
+                                {nameError ? <Text className="text-red-500 font-bold text-[10px] mt-1 ml-1">{nameError}</Text> : null}
                                 {nameSuggestions.length > 0 && (
-                                    <View className="bg-white border border-border rounded-xl mb-4 shadow-lg overflow-hidden">
+                                    <View className="bg-white border border-border rounded-xl mt-1 shadow-lg overflow-hidden">
                                         {nameSuggestions.map((s, idx) => (
                                             <TouchableOpacity 
                                                 key={idx} 
@@ -586,22 +774,63 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                                     </View>
                                 )}
                             </View>
+
+                            {/* Price and Stock Inputs with dynamic inline errors and red borders */}
                             <View className="flex-row gap-4 mb-4">
-                                <TextInput placeholderTextColor="#94A3B8" 
-                                    className="flex-1 bg-lightBackground border border-border p-4 rounded-xl font-bold text-textPrimary" 
-                                    placeholder={`Price (${symbol})`}
-                                    keyboardType="numeric" 
-                                    value={price} 
-                                    onChangeText={setPrice} 
-                                />
-                                <TextInput placeholderTextColor="#94A3B8" 
-                                    className="flex-1 bg-lightBackground border border-border p-4 rounded-xl font-bold text-textPrimary" 
-                                    placeholder="Quantity" 
-                                    keyboardType="numeric" 
-                                    value={stock} 
-                                    onChangeText={setStock} 
-                                />
+                                <View className="flex-1">
+                                    <TextInput placeholderTextColor="#94A3B8" 
+                                        className={`w-full bg-lightBackground border p-4 rounded-xl font-bold text-textPrimary ${priceError ? 'border-red-500' : 'border-border'}`} 
+                                        placeholder={`Price (${symbol})`}
+                                        keyboardType="numeric" 
+                                        value={price} 
+                                        onChangeText={(t) => { setPrice(t); if (priceError) setPriceError(''); }} 
+                                    />
+                                    {priceError ? <Text className="text-red-500 font-bold text-[10px] mt-1 ml-1">{priceError}</Text> : null}
+                                </View>
+                                <View className="flex-1">
+                                    <TextInput placeholderTextColor="#94A3B8" 
+                                        className={`w-full bg-lightBackground border p-4 rounded-xl font-bold text-textPrimary ${stockError ? 'border-red-500' : 'border-border'}`} 
+                                        placeholder="Quantity" 
+                                        keyboardType="numeric" 
+                                        value={stock} 
+                                        onChangeText={(t) => { setStock(t); if (stockError) setStockError(''); }} 
+                                    />
+                                    {stockError ? <Text className="text-red-500 font-bold text-[10px] mt-1 ml-1">{stockError}</Text> : null}
+                                </View>
                             </View>
+
+                            {/* Horizontal Category Selector Chips */}
+                            <Text className="text-textSecondary text-[10px] font-black uppercase mb-2 ml-1">Category</Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-4">
+                                <View className="flex-row gap-2">
+                                    {CATEGORIES.map((cat) => (
+                                        <TouchableOpacity
+                                            key={cat.value}
+                                            onPress={() => {
+                                                setCategory(cat.value);
+                                                setShowCustomInput(cat.value === 'Others');
+                                            }}
+                                            className={`px-4 py-2 rounded-full border ${category === cat.value ? 'bg-primary border-primary' : 'bg-lightBackground border-border'}`}
+                                        >
+                                            <Text className={`font-black text-[11px] ${category === cat.value ? 'text-white' : 'text-textPrimary'}`}>
+                                                {cat.label}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                            </ScrollView>
+
+                            {/* Conditional Custom Category Input */}
+                            {showCustomInput && (
+                                <TextInput placeholderTextColor="#94A3B8"
+                                    className="bg-lightBackground border border-border p-4 rounded-xl font-bold mb-4 text-textPrimary"
+                                    placeholder="Enter Custom Category"
+                                    value={customCategory}
+                                    onChangeText={setCustomCategory}
+                                />
+                            )}
+
+                            {/* Barcode input */}
                             <View className="flex-row items-center bg-lightBackground border border-border rounded-xl pr-2 mb-8">
                                 <TextInput placeholderTextColor="#94A3B8" 
                                     className="flex-1 p-4 font-bold text-textPrimary" 
@@ -613,6 +842,8 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                                     <ScanLine size={20} color="#16A34A" />
                                 </TouchableOpacity>
                             </View>
+
+                            {/* Save action */}
                             <TouchableOpacity onPress={handleSave} className="bg-primary py-4 rounded-2xl items-center shadow-sm">
                                 {loading ? <ActivityIndicator color="white" /> : <Text className="text-white font-black text-lg">{editingProduct ? 'Update Product' : 'Save Product'}</Text>}
                             </TouchableOpacity>
@@ -650,6 +881,18 @@ export default function InventoryScreen({ initialBarcode, onClearBarcode }: Inve
                     </View>
                 </View>
             </Modal>
+            <AppModal
+                visible={modal?.visible ?? false}
+                type={modal?.type ?? 'info'}
+                title={modal?.title ?? ''}
+                subtitle={modal?.subtitle}
+                primaryLabel={modal?.primaryLabel}
+                onPrimary={() => { modal?.onPrimary?.(); setModal(null); }}
+                secondaryLabel={modal?.secondaryLabel}
+                onSecondary={() => { modal?.onSecondary?.(); setModal(null); }}
+                onDismiss={() => setModal(null)}
+                autoDismiss={modal?.autoDismiss}
+            />
         </View>
     );
 }
