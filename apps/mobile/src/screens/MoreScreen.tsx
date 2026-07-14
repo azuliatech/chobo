@@ -273,7 +273,9 @@ export default function MoreScreen() {
                             />
                         )}
                     </View>
-                    <Text className="text-center text-textSecondary text-[10px] mt-8 font-bold">Chobo v1.0.0</Text>
+                    <Text className="text-center text-textSecondary text-[10px] mt-8 font-bold">
+                        Chobo v1.0.0 {process.env.EXPO_PUBLIC_API_URL?.includes('staging') ? '- Staging (Dev)' : ''}
+                    </Text>
                 </View>
             </ScrollView>
 

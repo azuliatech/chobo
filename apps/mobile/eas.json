@@ -21,6 +21,13 @@
         "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "chobo_uploads"
       }
     },
+    "preview-store": {
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api-staging.usechobo.com/api/v1",
+        "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "xwa87g1b",
+        "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "chobo_uploads"
+      }
+    },
     "production": {
       "autoIncrement": true,
       "env": {
@@ -31,6 +38,11 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "./google-play-key.json",
+        "track": "internal"
+      }
+    }
   }
 }
