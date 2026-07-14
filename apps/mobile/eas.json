@@ -22,6 +22,7 @@
       }
     },
     "preview-store": {
+      "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api-staging.usechobo.com/api/v1",
         "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "xwa87g1b",
@@ -38,6 +39,12 @@
     }
   },
   "submit": {
+    "preview-store": {
+      "android": {
+        "serviceAccountKeyPath": "./google-play-key.json",
+        "track": "internal"
+      }
+    },
     "production": {
       "android": {
         "serviceAccountKeyPath": "./google-play-key.json",
