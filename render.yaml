@@ -4,8 +4,8 @@ services:
     env: node
     plan: free
     rootDir: apps/api
-    buildCommand: npm install && npm run build
-    startCommand: npm run start:prod
+    buildCommand: npm install --include=dev && npx prisma generate && npm run build
+    startCommand: npx prisma generate && npx prisma migrate deploy && node dist/main.js
     envVars:
       - key: NODE_ENV
         value: staging
@@ -35,8 +35,8 @@ services:
     env: node
     plan: free
     rootDir: apps/api
-    buildCommand: npm install && npm run build
-    startCommand: npm run start:prod
+    buildCommand: npm install --include=dev && npx prisma generate && npm run build
+    startCommand: npx prisma generate && npx prisma migrate deploy && node dist/main.js
     envVars:
       - key: NODE_ENV
         value: production

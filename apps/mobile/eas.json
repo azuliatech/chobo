@@ -6,26 +6,58 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api-staging.usechobo.com/api/v1",
+        "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "xwa87g1b",
+        "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "chobo_uploads",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "305417516673-5vfb1nn006scntf41escb0uo054ut187.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "305417516673-lbh2dt6mniiaeoif7jai4bvaemha3382.apps.googleusercontent.com"
+      }
     },
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://kasham-api-staging.onrender.com/api/v1",
-        "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "dz1wzvee5",
-        "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "chobo_uploads"
+        "EXPO_PUBLIC_API_URL": "https://api-staging.usechobo.com/api/v1",
+        "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "xwa87g1b",
+        "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "chobo_uploads",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "305417516673-5vfb1nn006scntf41escb0uo054ut187.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "305417516673-lbh2dt6mniiaeoif7jai4bvaemha3382.apps.googleusercontent.com"
+      }
+    },
+    "preview-store": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api-staging.usechobo.com/api/v1",
+        "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "xwa87g1b",
+        "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "chobo_uploads",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "305417516673-5vfb1nn006scntf41escb0uo054ut187.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "305417516673-lbh2dt6mniiaeoif7jai4bvaemha3382.apps.googleusercontent.com"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://kasham-api-production.onrender.com/api/v1",
-        "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "dz1wzvee5",
-        "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "chobo_uploads"
+        "EXPO_PUBLIC_API_URL": "https://api.usechobo.com/api/v1",
+        "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "xwa87g1b",
+        "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "chobo_uploads",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "305417516673-5vfb1nn006scntf41escb0uo054ut187.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "305417516673-lbh2dt6mniiaeoif7jai4bvaemha3382.apps.googleusercontent.com"
       }
     }
   },
   "submit": {
-    "production": {}
+    "preview-store": {
+      "android": {
+        "serviceAccountKeyPath": "./google-play-key.json",
+        "track": "internal"
+      }
+    },
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "./google-play-key.json",
+        "track": "internal"
+      }
+    }
   }
 }

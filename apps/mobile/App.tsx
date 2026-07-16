@@ -159,9 +159,12 @@ function MainApp() {
   };
 
   useEffect(() => {
-    initDatabase()
+    const minWait = new Promise(resolve => setTimeout(resolve, 2000));
+    const initTask = initDatabase()
       .then(() => useCurrencyStore.getState().initCurrency())
-      .then(() => restoreToken())
+      .then(() => restoreToken());
+
+    Promise.all([initTask, minWait])
       .then(async () => {
         setReady(true);
         await SplashScreen.hideAsync().catch(() => {});
