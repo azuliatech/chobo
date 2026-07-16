@@ -13,8 +13,6 @@
       "enabled": false
     },
     "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "cover",
       "backgroundColor": "#16A34A"
     },
     "ios": {
@@ -56,7 +54,15 @@
     },
     "plugins": [
       "expo-sqlite",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#16A34A",
+          "image": "./assets/transparent.png",
+          "resizeMode": "contain"
+        }
+      ]
     ],
     "extra": {
       "eas": {

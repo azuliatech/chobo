@@ -11,6 +11,7 @@ import {
     Modal,
     Linking,
     StyleSheet,
+    Image,
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import * as WebBrowser from 'expo-web-browser';
@@ -38,6 +39,7 @@ import {
 import CountryPicker, { CountryCode } from 'react-native-country-picker-modal';
 import { saveCountryCode } from '../hooks/useCurrency';
 import AppModal from '../components/AppModal';
+import { ChevronLeft } from 'lucide-react-native';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -106,7 +108,6 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
     // Auth inputs
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
     const [name, setName] = useState('');
     const [businessName, setBusinessName] = useState('');
     const [businessType, setBusinessType] = useState(BUSINESS_TYPES[0]);
@@ -117,7 +118,6 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
 
     // Eye toggles
     const [showPassword, setShowPassword] = useState(false);
-    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
     // OTP State
     const [otpCode, setOtpCode] = useState('');
@@ -144,7 +144,6 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
     const [signupNameError, setSignupNameError] = useState('');
     const [signupEmailError, setSignupEmailError] = useState('');
     const [signupPasswordError, setSignupPasswordError] = useState('');
-    const [signupConfirmPasswordError, setSignupConfirmPasswordError] = useState('');
 
     // Walkthrough states
     const [showSplash, setShowSplash] = useState(true);
@@ -189,12 +188,12 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
     const hasResetSpecial = /[^A-Za-z0-9]/.test(newPassword);
     const isResetPasswordValid = hasResetLength && hasResetUpper && hasResetNumber && hasResetSpecial;
 
-    // Splash timeout
+    // JS Splash timeout — minimum 2 seconds
     useEffect(() => {
         const timer = setTimeout(() => {
             setShowSplash(false);
             setShowWalkthrough(true);
-        }, 1500);
+        }, 2000);
         return () => clearTimeout(timer);
     }, []);
 
@@ -225,7 +224,6 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
         webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
         androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
         iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
-        redirectUri,
     });
 
     useEffect(() => {
@@ -341,19 +339,6 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
         return true;
     };
 
-    const validateSignupConfirmPassword = (val: string) => {
-        if (!val.trim()) {
-            setSignupConfirmPasswordError('Please confirm your password');
-            return false;
-        }
-        if (val !== password) {
-            setSignupConfirmPasswordError('Passwords do not match');
-            return false;
-        }
-        setSignupConfirmPasswordError('');
-        return true;
-    };
-
     // ── Login Action ─────────────────────────────────────────────────────────
     const handleLogin = async () => {
         setLoginEmailError('');
@@ -413,14 +398,12 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
         setSignupNameError('');
         setSignupEmailError('');
         setSignupPasswordError('');
-        setSignupConfirmPasswordError('');
 
         const isNameValid = validateSignupName(name);
         const isEmailValid = validateSignupEmail(email);
         const isPassValid = validateSignupPassword(password);
-        const isConfirmValid = validateSignupConfirmPassword(confirmPassword);
 
-        if (!isNameValid || !isEmailValid || !isPassValid || !isConfirmValid) {
+        if (!isNameValid || !isEmailValid || !isPassValid) {
             return;
         }
         if (!tosAccepted) {
@@ -669,142 +652,214 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
     };
 
     const renderWelcome = () => (
-        <View className="flex-1 px-6 justify-center bg-primary">
-            <View className="absolute -top-32 -left-32 w-96 h-96 bg-white/10 rounded-full blur-3xl" />
-            <View className="absolute -bottom-32 -right-32 w-96 h-96 bg-accent/20 rounded-full blur-3xl" />
+        <View className="flex-1 bg-white" style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}>
+            {/* Green logo card at the top */}
+            <View
+                style={{
+                    marginHorizontal: 24,
+                    marginTop: 32,
+                    marginBottom: 28,
+                    borderRadius: 28,
+                    backgroundColor: '#16A34A',
+                    paddingVertical: 40,
+                    alignItems: 'center',
+                    overflow: 'hidden',
+                }}
+            >
+                {/* Decorative circles — same green pattern as before */}
+                <View style={{ position: 'absolute', top: -40, left: -40, width: 160, height: 160, borderRadius: 80, backgroundColor: 'rgba(255,255,255,0.07)' }} />
+                <View style={{ position: 'absolute', bottom: -40, right: -40, width: 160, height: 160, borderRadius: 80, backgroundColor: 'rgba(0,0,0,0.06)' }} />
+                <View style={{ position: 'absolute', top: 20, right: -20, width: 100, height: 100, borderRadius: 50, backgroundColor: 'rgba(255,255,255,0.04)' }} />
 
-            <View className="flex-1 justify-center items-center">
-                <View className="w-24 h-24 bg-white rounded-3xl items-center justify-center shadow-2xl shadow-black/50 mb-8">
-                    <Store size={48} color="#16A34A" />
-                </View>
-                <Text className="text-white font-black text-5xl tracking-tight text-center mb-2">Chobo</Text>
-                <Text className="text-white/80 font-bold text-base text-center max-w-[280px]">
-                    Know your money. Track your stock. Never forget who owes you.
+                <Image
+                    source={require('../../assets/logo-white.png')}
+                    style={{ width: 240, height: 110, resizeMode: 'contain' }}
+                />
+                <Text
+                    style={{ color: 'white', fontWeight: 'bold', marginTop: 10, textTransform: 'uppercase', fontSize: 13, opacity: 0.85, letterSpacing: 2 }}
+                >
+                    Sell. Track. Grow.
                 </Text>
             </View>
 
-            <View className="mb-12">
-                <TouchableOpacity
-                    onPress={() => setStep('signup_step1')}
-                    className="bg-white w-full h-[52px] rounded-xl items-center justify-center shadow-lg mb-4"
-                >
-                    <Text className="text-primary font-black text-lg">Create Account</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                    onPress={() => setStep('login')}
-                    className="bg-black/20 w-full h-[52px] rounded-xl items-center justify-center"
-                >
-                    <Text className="text-white font-bold text-lg">Log In</Text>
-                </TouchableOpacity>
+            {/* Bottom content on white */}
+            <View style={{ flex: 1, paddingHorizontal: 28, justifyContent: 'space-between', paddingBottom: 8 }}>
+                <View>
+                    <Text
+                        style={{ fontSize: 24, fontWeight: '900', color: '#0F172A', textAlign: 'center', marginBottom: 8 }}
+                    >
+                        Welcome to Chobo
+                    </Text>
+                    <Text
+                        style={{ fontSize: 14, lineHeight: 22, color: '#64748B', textAlign: 'center' }}
+                    >
+                        Your digital record book for selling, tracking stock, and growing your business.
+                    </Text>
+                </View>
+
+                <View style={{ gap: 12, marginTop: 24 }}>
+                    <TouchableOpacity
+                        onPress={() => setStep('signup_step1')}
+                        style={{ width: '100%', height: 52, backgroundColor: '#16A34A', borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10 }}
+                    >
+                        <Mail size={20} color="white" />
+                        <Text style={{ color: 'white', fontWeight: '700', fontSize: 16 }}>Continue with Email</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        onPress={() => googlePromptAsync()}
+                        disabled={!googleRequest || loading}
+                        style={{ width: '100%', height: 52, backgroundColor: 'white', borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10, borderWidth: 1.5, borderColor: '#E5E7EB' }}
+                    >
+                        <GoogleIcon size={20} />
+                        <Text style={{ color: '#0F172A', fontWeight: '700', fontSize: 16 }}>Continue with Google</Text>
+                    </TouchableOpacity>
+                </View>
+
+                <View style={{ alignItems: 'center', marginTop: 20 }}>
+                    <TouchableOpacity onPress={() => setStep('login')} style={{ marginBottom: 10 }}>
+                        <Text style={{ fontSize: 14, color: '#64748B' }}>
+                            Already have an account? <Text style={{ color: '#16A34A', fontWeight: 'bold' }}>Log in</Text>
+                        </Text>
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: 11, color: '#94A3B8', textAlign: 'center' }}>
+                        By continuing, you agree to our{' '}
+                        <Text style={{ textDecorationLine: 'underline' }}>Terms of Service</Text> and{' '}
+                        <Text style={{ textDecorationLine: 'underline' }}>Privacy Policy</Text>
+                    </Text>
+                </View>
             </View>
         </View>
     );
 
     const renderLogin = () => (
-        <View className="flex-1 bg-lightBackground px-6 pt-12">
-            <TouchableOpacity
-                onPress={() => setStep('welcome')}
-                className="w-10 h-10 bg-white items-center justify-center rounded-full mb-8 shadow-sm"
+        <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={{ flex: 1, backgroundColor: '#F8FAFC' }}
+        >
+            <ScrollView
+                contentContainerStyle={{ flexGrow: 1, paddingTop: insets.top + 16, paddingBottom: insets.bottom + 24, paddingHorizontal: 24 }}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
             >
-                <ArrowLeft size={20} color="#0F172A" />
-            </TouchableOpacity>
-            <Text className="text-3xl font-black text-textPrimary mb-2">Welcome Back</Text>
-            <Text className="text-textSecondary font-bold mb-8">Enter your details to access your store.</Text>
+                <TouchableOpacity
+                    onPress={() => setStep('welcome')}
+                    className="w-10 h-10 bg-white items-center justify-center rounded-full mb-8 shadow-sm"
+                >
+                    <ArrowLeft size={20} color="#0F172A" />
+                </TouchableOpacity>
+                <Text className="text-3xl font-black text-textPrimary mb-2">Welcome Back</Text>
+                <Text className="text-textSecondary font-bold mb-8">Enter your details to access your store.</Text>
 
-            <View className="mb-5">
-                <Text className="text-textSecondary text-xs font-black uppercase mb-2">Email Address</Text>
-                <View className="flex-row items-center bg-white border border-border rounded-xl px-4 h-14 shadow-sm">
-                    <Mail size={20} color="#94A3B8" className="mr-3" />
-                    <TextInput
-                        className="flex-1 font-bold text-base text-textPrimary"
-                        placeholder="e.g. name@company.com"
-                        placeholderTextColor="#94A3B8"
-                        keyboardType="email-address"
-                        autoCapitalize="none"
-                        value={email}
-                        onChangeText={(t) => {
-                            setEmail(t);
-                            setLoginEmailError('');
-                        }}
-                        onBlur={() => validateEmail(email)}
-                    />
+                <View className="mb-5">
+                    <Text className="text-textSecondary text-xs font-black uppercase mb-2">Email Address</Text>
+                    <View className="flex-row items-center bg-white border border-border rounded-xl px-4 h-14 shadow-sm">
+                        <Mail size={20} color="#94A3B8" className="mr-3" />
+                        <TextInput
+                            className="flex-1 font-bold text-base text-textPrimary"
+                            placeholder="e.g. name@company.com"
+                            placeholderTextColor="#94A3B8"
+                            keyboardType="email-address"
+                            autoCapitalize="none"
+                            value={email}
+                            onChangeText={(t) => {
+                                setEmail(t);
+                                setLoginEmailError('');
+                            }}
+                            onBlur={() => validateEmail(email)}
+                        />
+                    </View>
+                    {loginEmailError ? (
+                        <Text style={{ color: '#EF4444', fontSize: 12, marginTop: 4 }}>{loginEmailError}</Text>
+                    ) : null}
                 </View>
-                {loginEmailError ? (
-                    <Text style={{ color: '#EF4444', fontSize: 12, marginTop: 4 }}>{loginEmailError}</Text>
-                ) : null}
-            </View>
 
-            <View className="mb-4">
-                <Text className="text-textSecondary text-xs font-black uppercase mb-2">Password</Text>
-                <View className="flex-row items-center bg-white border border-border rounded-xl px-4 h-14 shadow-sm">
-                    <Lock size={20} color="#94A3B8" className="mr-3" />
-                    <TextInput
-                        className="flex-1 font-bold text-base text-textPrimary"
-                        placeholder="Enter password"
-                        placeholderTextColor="#94A3B8"
-                        secureTextEntry={!showPassword}
-                        value={password}
-                        onChangeText={(t) => {
-                            setPassword(t);
-                            setLoginPasswordError('');
-                        }}
-                        onBlur={() => validatePassword(password)}
-                    />
-                    <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                        {showPassword ? <EyeOff size={20} color="#94A3B8" /> : <Eye size={20} color="#94A3B8" />}
+                <View className="mb-4">
+                    <Text className="text-textSecondary text-xs font-black uppercase mb-2">Password</Text>
+                    <View className="flex-row items-center bg-white border border-border rounded-xl px-4 h-14 shadow-sm">
+                        <Lock size={20} color="#94A3B8" className="mr-3" />
+                        <TextInput
+                            className="flex-1 font-bold text-base text-textPrimary"
+                            placeholder="Enter password"
+                            placeholderTextColor="#94A3B8"
+                            secureTextEntry={!showPassword}
+                            value={password}
+                            onChangeText={(t) => {
+                                setPassword(t);
+                                setLoginPasswordError('');
+                            }}
+                            onBlur={() => validatePassword(password)}
+                        />
+                        <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                            {showPassword ? <EyeOff size={20} color="#94A3B8" /> : <Eye size={20} color="#94A3B8" />}
+                        </TouchableOpacity>
+                    </View>
+                    {loginPasswordError ? (
+                        <Text style={{ color: '#EF4444', fontSize: 12, marginTop: 4 }}>{loginPasswordError}</Text>
+                    ) : null}
+                </View>
+
+                <TouchableOpacity onPress={() => setForgotPasswordVisible(true)} className="align-self-end mb-8">
+                    <Text className="text-primary font-bold text-sm text-right">Forgot Password?</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    onPress={handleLogin}
+                    disabled={loading || !email.trim() || !password.trim()}
+                    className={`w-full h-14 rounded-xl items-center justify-center shadow-lg shadow-primary/20 mb-6 ${
+                        loading || !email.trim() || !password.trim() ? 'bg-primary/50' : 'bg-primary'
+                    }`}
+                >
+                    {loading ? <ActivityIndicator color="white" /> : <Text className="text-white font-black text-lg">Log In</Text>}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    onPress={() => googlePromptAsync()}
+                    disabled={!googleRequest || loading}
+                    className="w-full h-14 bg-white border border-border rounded-xl items-center justify-center flex-row shadow-sm"
+                    style={{ gap: 12 }}
+                >
+                    <GoogleIcon size={20} />
+                    <Text className="text-textPrimary font-bold text-base">Continue with Google</Text>
+                </TouchableOpacity>
+
+                <View style={{ alignItems: 'center', marginTop: 24 }}>
+                    <TouchableOpacity onPress={() => setStep('signup_step1')}>
+                        <Text style={{ fontSize: 14, color: '#64748B' }}>
+                            Don't have an account? <Text style={{ color: '#16A34A', fontWeight: 'bold' }}>Sign up</Text>
+                        </Text>
                     </TouchableOpacity>
                 </View>
-                {loginPasswordError ? (
-                    <Text style={{ color: '#EF4444', fontSize: 12, marginTop: 4 }}>{loginPasswordError}</Text>
-                ) : null}
-            </View>
-
-            <TouchableOpacity onPress={() => setForgotPasswordVisible(true)} className="align-self-end mb-8">
-                <Text className="text-primary font-bold text-sm text-right">Forgot Password?</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-                onPress={handleLogin}
-                disabled={loading || !email.trim() || !password.trim()}
-                className={`w-full h-14 rounded-xl items-center justify-center shadow-lg shadow-primary/20 mb-6 ${
-                    loading || !email.trim() || !password.trim() ? 'bg-primary/50' : 'bg-primary'
-                }`}
-            >
-                {loading ? <ActivityIndicator color="white" /> : <Text className="text-white font-black text-lg">Log In</Text>}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-                onPress={() => googlePromptAsync()}
-                disabled={!googleRequest || loading}
-                className="w-full h-14 bg-white border border-border rounded-xl items-center justify-center flex-row shadow-sm"
-                style={{ gap: 12 }}
-            >
-                <GoogleIcon size={20} />
-                <Text className="text-textPrimary font-bold text-base">Continue with Google</Text>
-            </TouchableOpacity>
-        </View>
+            </ScrollView>
+        </KeyboardAvoidingView>
     );
 
     const renderSignupStep1 = () => (
-        <ScrollView className="flex-1 bg-lightBackground px-6 pt-12" showsVerticalScrollIndicator={false}>
-            <TouchableOpacity
-                onPress={() => setStep('welcome')}
-                className="w-10 h-10 bg-white items-center justify-center rounded-full mb-6 shadow-sm"
+        <KeyboardAvoidingView 
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={{ flex: 1, backgroundColor: '#FFFFFF' }}
+        >
+            <ScrollView 
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 40, paddingHorizontal: 32 }}
             >
-                <ArrowLeft size={20} color="#0F172A" />
-            </TouchableOpacity>
+                <TouchableOpacity
+                    onPress={() => setStep('welcome')}
+                    className="w-10 h-10 items-center justify-center -ml-2 mb-6"
+                >
+                    <ChevronLeft size={28} color="#0F172A" />
+                </TouchableOpacity>
 
-            <Text className="text-3xl font-black text-textPrimary mb-2">Create Account</Text>
-            <Text className="text-textSecondary font-bold mb-8">Register credentials for your Chobo account.</Text>
+                <Text className="text-[#0F172A] mb-2" style={{ fontFamily: 'Poppins-Bold', fontSize: 28 }}>Create your account</Text>
+                <Text className="text-[#64748B] mb-8" style={{ fontSize: 14 }}>Start managing your shop smarter.</Text>
 
-            {/* Name */}
-            <View className="mb-5">
-                <Text className="text-textSecondary text-xs font-black uppercase mb-2">Full Name</Text>
-                <View className="flex-row items-center bg-white border border-border rounded-xl px-4 h-14 shadow-sm">
-                    <User size={20} color="#94A3B8" className="mr-3" />
+                {/* Name */}
+                <View className="mb-5">
+                    <Text className="text-[#0F172A] font-semibold mb-[6px]" style={{ fontSize: 13 }}>Full name</Text>
                     <TextInput
-                        className="flex-1 font-bold text-base text-textPrimary"
-                        placeholder="e.g. John Doe"
+                        className={`w-full h-[52px] bg-white border rounded-xl px-4 text-[#0F172A] text-[15px] ${signupNameError ? 'border-red-500' : 'border-border focus:border-primary'}`}
+                        placeholder="Your full name"
                         placeholderTextColor="#94A3B8"
                         value={name}
                         onChangeText={(t) => {
@@ -813,20 +868,17 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
                         }}
                         onBlur={() => validateSignupName(name)}
                     />
+                    {signupNameError ? (
+                        <Text style={{ color: '#EF4444', fontSize: 12, marginTop: 4 }}>{signupNameError}</Text>
+                    ) : null}
                 </View>
-                {signupNameError ? (
-                    <Text style={{ color: '#EF4444', fontSize: 12, marginTop: 4 }}>{signupNameError}</Text>
-                ) : null}
-            </View>
 
-            {/* Email */}
-            <View className="mb-5">
-                <Text className="text-textSecondary text-xs font-black uppercase mb-2">Email Address</Text>
-                <View className="flex-row items-center bg-white border border-border rounded-xl px-4 h-14 shadow-sm">
-                    <Mail size={20} color="#94A3B8" className="mr-3" />
+                {/* Email */}
+                <View className="mb-5">
+                    <Text className="text-[#0F172A] font-semibold mb-[6px]" style={{ fontSize: 13 }}>Email address</Text>
                     <TextInput
-                        className="flex-1 font-bold text-base text-textPrimary"
-                        placeholder="e.g. name@company.com"
+                        className={`w-full h-[52px] bg-white border rounded-xl px-4 text-[#0F172A] text-[15px] ${signupEmailError ? 'border-red-500' : 'border-border focus:border-primary'}`}
+                        placeholder="you@email.com"
                         placeholderTextColor="#94A3B8"
                         keyboardType="email-address"
                         autoCapitalize="none"
@@ -837,137 +889,134 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
                         }}
                         onBlur={() => validateSignupEmail(email)}
                     />
+                    {signupEmailError ? (
+                        <Text style={{ color: '#EF4444', fontSize: 12, marginTop: 4 }}>{signupEmailError}</Text>
+                    ) : null}
                 </View>
-                {signupEmailError ? (
-                    <Text style={{ color: '#EF4444', fontSize: 12, marginTop: 4 }}>{signupEmailError}</Text>
-                ) : null}
-            </View>
 
-            {/* Country Picker */}
-            <View className="mb-5">
-                <Text className="text-textSecondary text-xs font-black uppercase mb-2">Country</Text>
-                <View className="flex-row items-center bg-white border border-border rounded-xl px-4 h-14 shadow-sm">
-                    <CountryPicker
-                        withFilter
-                        withCallingCode
-                        withAlphaFilter
-                        countryCode={countryCode}
-                        onSelect={(country) => {
-                            setCountryCode(country.cca2);
-                            setCallingCode(country.callingCode[0]);
-                        }}
-                    />
-                    <Text className="font-bold text-base text-textPrimary ml-3">
-                        {countryCode === 'NG' ? 'Nigeria' : countryCode === 'GH' ? 'Ghana' : 'Other'}
+                {/* Country Picker */}
+                <View className="mb-5">
+                    <Text className="text-[#0F172A] font-semibold mb-[6px]" style={{ fontSize: 13 }}>Country</Text>
+                    <View className="w-full h-[52px] bg-white border border-border rounded-xl px-4 flex-row items-center focus:border-primary">
+                        <CountryPicker
+                            withFilter
+                            withCallingCode
+                            withAlphaFilter
+                            countryCode={countryCode}
+                            onSelect={(country) => {
+                                setCountryCode(country.cca2);
+                                setCallingCode(country.callingCode[0]);
+                            }}
+                        />
+                        <Text className="text-[#0F172A] text-[15px] ml-2">
+                            {countryCode === 'NG' ? 'Nigeria' : countryCode === 'GH' ? 'Ghana' : 'Other'}
+                        </Text>
+                    </View>
+                </View>
+
+                {/* Password */}
+                <View className="mb-6">
+                    <Text className="text-[#0F172A] font-semibold mb-[6px]" style={{ fontSize: 13 }}>Password</Text>
+                    <View className={`w-full h-[52px] bg-white border rounded-xl px-4 flex-row items-center ${signupPasswordError ? 'border-red-500' : 'border-border focus:border-primary'}`}>
+                        <TextInput
+                            className="flex-1 text-[#0F172A] text-[15px]"
+                            placeholder="Create a password"
+                            placeholderTextColor="#94A3B8"
+                            secureTextEntry={!showPassword}
+                            value={password}
+                            onChangeText={(t) => {
+                                setPassword(t);
+                                setSignupPasswordError('');
+                            }}
+                            onBlur={() => validateSignupPassword(password)}
+                        />
+                        <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                            {showPassword ? <EyeOff size={20} color="#94A3B8" /> : <Eye size={20} color="#94A3B8" />}
+                        </TouchableOpacity>
+                    </View>
+                    {signupPasswordError ? (
+                        <Text style={{ color: '#EF4444', fontSize: 12, marginTop: 4 }}>{signupPasswordError}</Text>
+                    ) : null}
+
+                    {/* Password Strength Checklist */}
+                    {password.length > 0 && (
+                        <View className="mt-3">
+                            <View className="flex-row items-center mb-1">
+                                <CheckCircle size={14} color={hasLength ? '#16A34A' : '#94A3B8'} />
+                                <Text className={`text-xs ml-2 font-semibold ${hasLength ? 'text-[#16A34A]' : 'text-[#94A3B8]'}`}>
+                                    At least 8 characters
+                                </Text>
+                            </View>
+                            <View className="flex-row items-center mb-1">
+                                <CheckCircle size={14} color={hasUpper ? '#16A34A' : '#94A3B8'} />
+                                <Text className={`text-xs ml-2 font-semibold ${hasUpper ? 'text-[#16A34A]' : 'text-[#94A3B8]'}`}>
+                                    At least 1 uppercase letter
+                                </Text>
+                            </View>
+                            <View className="flex-row items-center mb-1">
+                                <CheckCircle size={14} color={hasNumber ? '#16A34A' : '#94A3B8'} />
+                                <Text className={`text-xs ml-2 font-semibold ${hasNumber ? 'text-[#16A34A]' : 'text-[#94A3B8]'}`}>
+                                    At least 1 number
+                                </Text>
+                            </View>
+                            <View className="flex-row items-center">
+                                <CheckCircle size={14} color={hasSpecial ? '#16A34A' : '#94A3B8'} />
+                                <Text className={`text-xs ml-2 font-semibold ${hasSpecial ? 'text-[#16A34A]' : 'text-[#94A3B8]'}`}>
+                                    At least 1 special character
+                                </Text>
+                            </View>
+                        </View>
+                    )}
+                </View>
+
+                {signupError ? <Text className="text-red-500 font-bold text-xs mb-4 text-center">{signupError}</Text> : null}
+
+                {/* Submit button */}
+                <TouchableOpacity
+                    onPress={handleSignupStep1}
+                    disabled={loading || !name.trim() || !email.trim() || !password.trim() || !isPasswordValid}
+                    className={`w-full h-[52px] rounded-xl items-center justify-center mb-6 ${
+                        loading || !name.trim() || !email.trim() || !password.trim() || !isPasswordValid ? 'bg-[#E5E7EB]' : 'bg-[#16A34A]'
+                    }`}
+                >
+                    {loading ? <ActivityIndicator color={loading || !name.trim() || !email.trim() || !password.trim() || !isPasswordValid ? "#94A3B8" : "white"} /> : 
+                    <Text className={`font-semibold text-[15px] ${loading || !name.trim() || !email.trim() || !password.trim() || !isPasswordValid ? 'text-[#94A3B8]' : 'text-white'}`}>Create account</Text>}
+                </TouchableOpacity>
+
+                {/* Divider */}
+                <View className="flex-row items-center mb-6">
+                    <View className="flex-1 h-[1px] bg-[#E5E7EB]" />
+                    <Text className="mx-4 text-[#94A3B8] text-[12px]">OR</Text>
+                    <View className="flex-1 h-[1px] bg-[#E5E7EB]" />
+                </View>
+
+                {/* Google Button */}
+                <TouchableOpacity
+                    onPress={() => googlePromptAsync()}
+                    disabled={!googleRequest || loading}
+                    className="w-full h-[52px] bg-white border border-[#E5E7EB] rounded-xl items-center justify-center flex-row shadow-sm mb-8"
+                >
+                    <GoogleIcon size={20} />
+                    <Text className="text-[#0F172A] font-bold text-[15px] ml-3">Continue with Google</Text>
+                </TouchableOpacity>
+
+                {/* Footer */}
+                <View className="items-center">
+                    <TouchableOpacity onPress={() => setStep('login')} className="mb-2">
+                        <Text style={{ fontSize: 14, color: '#64748B' }}>
+                            Already have an account? <Text style={{ color: '#16A34A', fontWeight: 'bold' }}>Log in</Text>
+                        </Text>
+                    </TouchableOpacity>
+
+                    <Text style={{ fontSize: 11, color: '#94A3B8', textAlign: 'center' }}>
+                        By signing up you agree to our{' '}
+                        <Text style={{ textDecorationLine: 'underline' }}>Terms</Text> and{' '}
+                        <Text style={{ textDecorationLine: 'underline' }}>Privacy Policy</Text>
                     </Text>
                 </View>
-            </View>
 
-            {/* Password */}
-            <View className="mb-5">
-                <Text className="text-textSecondary text-xs font-black uppercase mb-2">Password</Text>
-                <View className="flex-row items-center bg-white border border-border rounded-xl px-4 h-14 shadow-sm mb-2">
-                    <Lock size={20} color="#94A3B8" className="mr-3" />
-                    <TextInput
-                        className="flex-1 font-bold text-base text-textPrimary"
-                        placeholder="Create password"
-                        placeholderTextColor="#94A3B8"
-                        secureTextEntry={!showPassword}
-                        value={password}
-                        onChangeText={(t) => {
-                            setPassword(t);
-                            setSignupPasswordError('');
-                        }}
-                        onBlur={() => validateSignupPassword(password)}
-                    />
-                    <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                        {showPassword ? <EyeOff size={20} color="#94A3B8" /> : <Eye size={20} color="#94A3B8" />}
-                    </TouchableOpacity>
-                </View>
-                {signupPasswordError ? (
-                    <Text style={{ color: '#EF4444', fontSize: 12, marginTop: 4 }}>{signupPasswordError}</Text>
-                ) : null}
-
-                {/* Password Strength Checklist */}
-                {password.length > 0 && (
-                    <View className="bg-white border border-border rounded-xl p-4 mt-2">
-                        <Text className="text-textSecondary text-[11px] font-black uppercase mb-2">
-                            Password Requirements
-                        </Text>
-                        <View className="flex-row items-center mb-1">
-                            <CheckCircle size={14} color={hasLength ? '#16A34A' : '#94A3B8'} />
-                            <Text className={`text-xs ml-2 font-bold ${hasLength ? 'text-primary' : 'text-textSecondary'}`}>
-                                At least 8 characters
-                            </Text>
-                        </View>
-                        <View className="flex-row items-center mb-1">
-                            <CheckCircle size={14} color={hasUpper ? '#16A34A' : '#94A3B8'} />
-                            <Text className={`text-xs ml-2 font-bold ${hasUpper ? 'text-primary' : 'text-textSecondary'}`}>
-                                At least 1 uppercase letter
-                            </Text>
-                        </View>
-                        <View className="flex-row items-center mb-1">
-                            <CheckCircle size={14} color={hasNumber ? '#16A34A' : '#94A3B8'} />
-                            <Text className={`text-xs ml-2 font-bold ${hasNumber ? 'text-primary' : 'text-textSecondary'}`}>
-                                At least 1 number
-                            </Text>
-                        </View>
-                        <View className="flex-row items-center">
-                            <CheckCircle size={14} color={hasSpecial ? '#16A34A' : '#94A3B8'} />
-                            <Text className={`text-xs ml-2 font-bold ${hasSpecial ? 'text-primary' : 'text-textSecondary'}`}>
-                                At least 1 special character
-                            </Text>
-                        </View>
-                    </View>
-                )}
-            </View>
-
-            {/* Confirm Password */}
-            <View className="mb-5">
-                <Text className="text-textSecondary text-xs font-black uppercase mb-2">Confirm Password</Text>
-                <View className="flex-row items-center bg-white border border-border rounded-xl px-4 h-14 shadow-sm">
-                    <Lock size={20} color="#94A3B8" className="mr-3" />
-                    <TextInput
-                        className="flex-1 font-bold text-base text-textPrimary"
-                        placeholder="Confirm password"
-                        placeholderTextColor="#94A3B8"
-                        secureTextEntry={!showConfirmPassword}
-                        value={confirmPassword}
-                        onChangeText={(t) => {
-                            setConfirmPassword(t);
-                            setSignupConfirmPasswordError('');
-                        }}
-                        onBlur={() => validateSignupConfirmPassword(confirmPassword)}
-                    />
-                    <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
-                        {showConfirmPassword ? <EyeOff size={20} color="#94A3B8" /> : <Eye size={20} color="#94A3B8" />}
-                    </TouchableOpacity>
-                </View>
-                {signupConfirmPasswordError ? (
-                    <Text style={{ color: '#EF4444', fontSize: 12, marginTop: 4 }}>{signupConfirmPasswordError}</Text>
-                ) : null}
-            </View>
-
-            {signupError ? <Text className="text-red-500 font-bold text-xs mb-6 text-center">{signupError}</Text> : null}
-
-            <TouchableOpacity
-                onPress={handleSignupStep1}
-                disabled={loading || !name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()}
-                className={`w-full h-14 rounded-xl items-center justify-center shadow-lg shadow-primary/20 mb-4 ${
-                    loading || !name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim() ? 'bg-primary/50' : 'bg-primary'
-                }`}
-            >
-                {loading ? <ActivityIndicator color="white" /> : <Text className="text-white font-black text-lg">Next Step</Text>}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-                onPress={() => googlePromptAsync()}
-                disabled={!googleRequest || loading}
-                className="w-full h-14 bg-white border border-border rounded-xl items-center justify-center flex-row shadow-sm mb-12"
-            >
-                <Text className="text-textPrimary font-bold text-base ml-2">Sign up with Google</Text>
-            </TouchableOpacity>
-        </ScrollView>
+            </ScrollView>
+        </KeyboardAvoidingView>
     );
 
     const renderVerifyEmail = () => {
@@ -1256,12 +1305,12 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
                 <View className="absolute -top-32 -left-32 w-96 h-96 bg-white/10 rounded-full blur-3xl" />
                 <View className="absolute -bottom-32 -right-32 w-96 h-96 bg-accent/20 rounded-full blur-3xl" />
                 <View className="items-center justify-center">
-                    <View className="w-28 h-28 bg-white rounded-[32px] items-center justify-center shadow-2xl mb-6">
-                        <Store size={56} color="#16A34A" />
-                    </View>
-                    <Text className="text-white font-black text-5xl tracking-tight">Chobo</Text>
+                    <Image 
+                        source={require('../../assets/logo-white.png')} 
+                        style={{ width: 280, height: 130, resizeMode: 'contain' }} 
+                    />
                     <Text className="text-white/80 font-bold text-sm mt-3 uppercase tracking-widest">
-                        Store POS & Stock
+                        Sell. Track. Grow.
                     </Text>
                     <ActivityIndicator size="small" color="white" style={{ marginTop: 24 }} />
                 </View>
@@ -1274,44 +1323,62 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
     }
 
     return (
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1">
-            <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
-                <View
-                    style={{
-                        paddingTop: insets.top,
-                        flex: 1,
-                        backgroundColor: step === 'welcome' ? '#16A34A' : '#F8FAFC',
-                    }}
-                >
-                    {step === 'welcome' && renderWelcome()}
-                    {step === 'login' && renderLogin()}
-                    {step === 'signup_step1' && renderSignupStep1()}
-                    {step === 'verify_email' && renderVerifyEmail()}
-                    {step === 'signup_step2' && renderSignupStep2()}
-                    {step === 'reset_password' && renderResetPassword()}
-                </View>
-            </ScrollView>
+        <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+            {step === 'welcome' && renderWelcome()}
+            {step === 'login' && renderLogin()}
+            {step === 'signup_step1' && renderSignupStep1()}
+            {step === 'verify_email' && (
+                <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+                    <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+                        <View style={{ paddingTop: insets.top, flex: 1, backgroundColor: '#F8FAFC' }}>
+                            {renderVerifyEmail()}
+                        </View>
+                    </ScrollView>
+                </KeyboardAvoidingView>
+            )}
+            {step === 'signup_step2' && (
+                <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+                    <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+                        <View style={{ paddingTop: insets.top, paddingBottom: insets.bottom, flex: 1, backgroundColor: '#F8FAFC' }}>
+                            {renderSignupStep2()}
+                        </View>
+                    </ScrollView>
+                </KeyboardAvoidingView>
+            )}
+            {step === 'reset_password' && (
+                <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+                    <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+                        <View style={{ paddingTop: insets.top, flex: 1, backgroundColor: '#F8FAFC' }}>
+                            {renderResetPassword()}
+                        </View>
+                    </ScrollView>
+                </KeyboardAvoidingView>
+            )}
 
             {/* Forgot Password Modal Sheet */}
             <Modal visible={forgotPasswordVisible} transparent animationType="slide">
                 <KeyboardAvoidingView
-                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-                    className="flex-1 bg-black/60 justify-end"
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+                    style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}
                 >
-                    <ScrollView 
-                        contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end' }}
-                        keyboardShouldPersistTaps="handled"
-                        showsVerticalScrollIndicator={false}
-                    >
-                        <TouchableOpacity activeOpacity={1} className="flex-1" onPress={() => {
+                    <TouchableOpacity
+                        style={{ flex: 1 }}
+                        activeOpacity={1}
+                        onPress={() => {
                             setForgotPasswordVisible(false);
                             setForgotEmail('');
                             setForgotError('');
-                        }} />
-                        <View
-                            className="bg-white rounded-t-[40px] p-6"
-                            style={{ paddingBottom: Math.max(insets.bottom, 24) }}
-                        >
+                        }}
+                    />
+                    <View
+                        style={{
+                            backgroundColor: 'white',
+                            borderTopLeftRadius: 40,
+                            borderTopRightRadius: 40,
+                            padding: 24,
+                            paddingBottom: Math.max(insets.bottom + 24, 40),
+                        }}
+                    >
                             <View className="w-12 h-1.5 bg-border rounded-full self-center mb-6" />
 
                             <View className="flex-row justify-between items-center mb-6">
@@ -1377,8 +1444,7 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
                                 </TouchableOpacity>
                             </View>
                         </View>
-                    </ScrollView>
-                </KeyboardAvoidingView>
+                    </KeyboardAvoidingView>
             </Modal>
 
             <AppModal
@@ -1388,6 +1454,6 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
                 subtitle={modalConfig.subtitle}
                 onDismiss={() => setModalConfig((prev) => ({ ...prev, visible: false }))}
             />
-        </KeyboardAvoidingView>
+        </View>
     );
 }

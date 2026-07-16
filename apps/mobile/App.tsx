@@ -159,6 +159,8 @@ function MainApp() {
   };
 
   useEffect(() => {
+    SplashScreen.hideAsync().catch(() => {});
+
     const minWait = new Promise(resolve => setTimeout(resolve, 2000));
     const initTask = initDatabase()
       .then(() => useCurrencyStore.getState().initCurrency())
@@ -167,12 +169,10 @@ function MainApp() {
     Promise.all([initTask, minWait])
       .then(async () => {
         setReady(true);
-        await SplashScreen.hideAsync().catch(() => {});
         refreshWorkspaces();
       })
       .catch(async (e) => {
         console.error(e);
-        await SplashScreen.hideAsync().catch(() => {});
       });
   }, []);
 
