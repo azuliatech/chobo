@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
+import * as AuthSession from 'expo-auth-session';
 import { useAuthStore } from '../store/authStore';
 import { API_URL } from '../config';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -193,14 +194,16 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
     }, [resetToken]);
 
     // Google OAuth setup
+    const redirectUri = AuthSession.makeRedirectUri({
+        scheme: 'chobo',
+        path: 'oauthredirect',
+    });
+
     const [googleRequest, googleResponse, googlePromptAsync] = Google.useAuthRequest({
         webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-        // Android and iOS client IDs for project 1010966887103:
-        // TODO: Create Android OAuth client ID in Google Cloud Console for project 1010966887103
-        // TODO: Create iOS OAuth client ID in Google Cloud Console for project 1010966887103
-        // Until these are created, expo-auth-session will use webClientId as fallback
         androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
         iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+        redirectUri,
     });
 
     useEffect(() => {

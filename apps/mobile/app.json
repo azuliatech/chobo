@@ -37,6 +37,10 @@
           "data": [
             {
               "scheme": "chobo"
+            },
+            {
+              "scheme": "chobo",
+              "host": "oauthredirect"
             }
           ],
           "category": [
