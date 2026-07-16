@@ -1294,78 +1294,91 @@ export default function LoginScreen({ resetToken, onClearResetToken }: LoginScre
 
             {/* Forgot Password Modal Sheet */}
             <Modal visible={forgotPasswordVisible} transparent animationType="slide">
-                <View className="flex-1 bg-black/60 justify-end">
-                    <KeyboardAvoidingView
-                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                        className="bg-white rounded-t-[40px] p-6"
-                        style={{ paddingBottom: Math.max(insets.bottom, 24) }}
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                    className="flex-1 bg-black/60 justify-end"
+                >
+                    <ScrollView 
+                        contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end' }}
+                        keyboardShouldPersistTaps="handled"
+                        showsVerticalScrollIndicator={false}
                     >
-                        <View className="w-12 h-1.5 bg-border rounded-full self-center mb-6" />
+                        <TouchableOpacity activeOpacity={1} className="flex-1" onPress={() => {
+                            setForgotPasswordVisible(false);
+                            setForgotEmail('');
+                            setForgotError('');
+                        }} />
+                        <View
+                            className="bg-white rounded-t-[40px] p-6"
+                            style={{ paddingBottom: Math.max(insets.bottom, 24) }}
+                        >
+                            <View className="w-12 h-1.5 bg-border rounded-full self-center mb-6" />
 
-                        <View className="flex-row justify-between items-center mb-6">
-                            <Text className="text-2xl font-black text-textPrimary">Reset Password</Text>
-                            <TouchableOpacity
-                                onPress={() => {
-                                    setForgotPasswordVisible(false);
-                                    setForgotEmail('');
-                                    setForgotError('');
-                                }}
-                                className="bg-lightBackground p-2 rounded-full"
-                            >
-                                <X size={20} color="#0F172A" />
-                            </TouchableOpacity>
-                        </View>
-
-                        <View>
-                            <Text className="text-textSecondary font-bold mb-6">
-                                Enter your registered email address to receive a secure password reset link.
-                            </Text>
-
-                            <View
-                                className={`flex-row items-center bg-lightBackground border rounded-xl px-4 h-14 mb-2 ${
-                                    forgotError ? 'border-red-500' : 'border-border'
-                                }`}
-                            >
-                                <Mail size={20} color="#94A3B8" className="mr-3" />
-                                <TextInput
-                                    className="flex-1 font-bold text-base text-textPrimary"
-                                    placeholder="e.g. name@company.com"
-                                    placeholderTextColor="#94A3B8"
-                                    keyboardType="email-address"
-                                    autoCapitalize="none"
-                                    value={forgotEmail}
-                                    onChangeText={(t) => {
-                                        setForgotEmail(t);
-                                        if (forgotError) setForgotError('');
+                            <View className="flex-row justify-between items-center mb-6">
+                                <Text className="text-2xl font-black text-textPrimary">Reset Password</Text>
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        setForgotPasswordVisible(false);
+                                        setForgotEmail('');
+                                        setForgotError('');
                                     }}
-                                    autoFocus
-                                />
+                                    className="bg-lightBackground p-2 rounded-full"
+                                >
+                                    <X size={20} color="#0F172A" />
+                                </TouchableOpacity>
                             </View>
-                            {forgotError ? (
-                                <Text className="text-red-500 font-bold text-xs mb-6 ml-1">{forgotError}</Text>
-                            ) : (
-                                <View className="h-4" />
-                            )}
 
-                            <TouchableOpacity
-                                onPress={handleForgotPassword}
-                                disabled={forgotLoading || !forgotEmail}
-                                className={`w-full h-[52px] rounded-xl items-center flex-row justify-center shadow-sm ${
-                                    forgotEmail && !forgotLoading ? 'bg-primary active:bg-[#15803D]' : 'bg-primary/50'
-                                }`}
-                            >
-                                {forgotLoading ? (
-                                    <ActivityIndicator color="white" />
+                            <View>
+                                <Text className="text-textSecondary font-bold mb-6">
+                                    Enter your registered email address to receive a secure password reset link.
+                                </Text>
+
+                                <View
+                                    className={`flex-row items-center bg-lightBackground border rounded-xl px-4 h-14 mb-2 ${
+                                        forgotError ? 'border-red-500' : 'border-border'
+                                    }`}
+                                >
+                                    <Mail size={20} color="#94A3B8" className="mr-3" />
+                                    <TextInput
+                                        className="flex-1 font-bold text-base text-textPrimary"
+                                        placeholder="e.g. name@company.com"
+                                        placeholderTextColor="#94A3B8"
+                                        keyboardType="email-address"
+                                        autoCapitalize="none"
+                                        value={forgotEmail}
+                                        onChangeText={(t) => {
+                                            setForgotEmail(t);
+                                            if (forgotError) setForgotError('');
+                                        }}
+                                        autoFocus
+                                    />
+                                </View>
+                                {forgotError ? (
+                                    <Text className="text-red-500 font-bold text-xs mb-6 ml-1">{forgotError}</Text>
                                 ) : (
-                                    <>
-                                        <Text className="text-white font-black text-lg mr-2">Send Reset Link</Text>
-                                        <ChevronRight size={20} color="white" />
-                                    </>
+                                    <View className="h-4" />
                                 )}
-                            </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    onPress={handleForgotPassword}
+                                    disabled={forgotLoading || !forgotEmail}
+                                    className={`w-full h-[52px] rounded-xl items-center flex-row justify-center shadow-sm ${
+                                        forgotEmail && !forgotLoading ? 'bg-primary active:bg-[#15803D]' : 'bg-primary/50'
+                                    }`}
+                                >
+                                    {forgotLoading ? (
+                                        <ActivityIndicator color="white" />
+                                    ) : (
+                                        <>
+                                            <Text className="text-white font-black text-lg mr-2">Send Reset Link</Text>
+                                            <ChevronRight size={20} color="white" />
+                                        </>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
                         </View>
-                    </KeyboardAvoidingView>
-                </View>
+                    </ScrollView>
+                </KeyboardAvoidingView>
             </Modal>
 
             <AppModal
